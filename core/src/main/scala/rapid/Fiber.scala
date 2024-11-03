@@ -5,7 +5,10 @@ import scala.concurrent.duration._
 
 class Fiber[Return](val task: Task[Return]) {
   private var result: Return = _
-  private val thread = Thread.ofVirtual().name(s"rapid-${Fiber.counter.incrementAndGet()}").start(() => result = task())
+  private val thread = Thread
+    .ofVirtual()
+    .name(s"rapid-${Fiber.counter.incrementAndGet()}")
+    .start(() => result = task())
 
   def await(): Return = {
     thread.join()

@@ -10,6 +10,9 @@ class Task[Return](val f: () => Return) extends AnyVal {
   def flatMap[T](f: Return => Task[T]): Task[T] = Task {
     f(this.f())()
   }
+  def sleep(duration: FiniteDuration): Task[Return] = flatMap { r =>
+    Task.sleep(duration).map(_ => r)
+  }
   def unit: Task[Unit] = map(_ => ())
 }
 

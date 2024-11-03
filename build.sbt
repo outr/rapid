@@ -62,3 +62,15 @@ lazy val core = project.in(file("core"))
       "org.scalatest" %% "scalatest" % scalaTestVersion % Test
     )
   )
+
+lazy val benchmark = project.in(file("benchmark"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(core)
+  .settings(
+    name := s"$projectName-benchmark",
+    libraryDependencies ++= Seq(
+      "org.openjdk.jmh" % "jmh-core" % "1.37",
+      "org.openjdk.jmh" % "jmh-generator-annprocess" % "1.37",
+      "org.typelevel" %% "cats-effect" % "3.5.4"
+    )
+  )
