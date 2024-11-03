@@ -31,9 +31,8 @@ class OverheadBenchmark {
   @Benchmark
   def ioBenchmark(): Int = {
     var result = 0
-    val io = IO(simpleComputation)
     for (_ <- 1 to iterations) {
-      result += io.unsafeRunSync()
+      result += IO.delay(simpleComputation).unsafeRunSync()
     }
     result
   }
@@ -41,10 +40,9 @@ class OverheadBenchmark {
   @Benchmark
   def zioBenchmark(): Int = {
     var result = 0
-    val zio = ZIO.attempt(simpleComputation)
     val runtime = Runtime.default
     for (_ <- 1 to iterations) {
-      result += Unsafe.unsafe(implicit u => runtime.unsafe.run(zio).getOrThrowFiberFailure())
+      result += Unsafe.unsafe(implicit u => runtime.unsafe.run(ZIO.attempt(simpleComputation)).getOrThrowFiberFailure())
     }
     result
   }
