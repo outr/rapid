@@ -3,12 +3,12 @@ package rapid
 import scala.concurrent.duration.FiniteDuration
 
 class Task[Return](val f: () => Return) extends AnyVal {
-  def apply(): Return = f()
+  def sync(): Return = f()
   def start(): Fiber[Return] = new Fiber(this)
   def await(): Return = start().await()
   def map[T](f: Return => T): Task[T] = Task(f(this.f()))
   def flatMap[T](f: Return => Task[T]): Task[T] = Task {
-    f(this.f())()
+    f(this.f()).sync()
   }
   def sleep(duration: FiniteDuration): Task[Return] = flatMap { r =>
     Task.sleep(duration).map(_ => r)

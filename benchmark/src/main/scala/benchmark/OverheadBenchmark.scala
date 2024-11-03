@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
 import rapid.Task
+import zio.{Runtime, Unsafe, ZIO}
 
 import java.util.concurrent.TimeUnit
 
@@ -33,6 +34,17 @@ class OverheadBenchmark {
     val io = IO(simpleComputation)
     for (_ <- 1 to iterations) {
       result += io.unsafeRunSync()
+    }
+    result
+  }
+
+  @Benchmark
+  def zioBenchmark(): Int = {
+    var result = 0
+    val zio = ZIO.attempt(simpleComputation)
+    val runtime = Runtime.default
+    for (_ <- 1 to iterations) {
+      result += Unsafe.unsafe(implicit u => runtime.unsafe.run(zio).getOrThrowFiberFailure())
     }
     result
   }

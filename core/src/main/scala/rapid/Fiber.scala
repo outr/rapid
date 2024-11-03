@@ -8,7 +8,7 @@ class Fiber[Return](val task: Task[Return]) {
   private val thread = Thread
     .ofVirtual()
     .name(s"rapid-${Fiber.counter.incrementAndGet()}")
-    .start(() => result = task())
+    .start(() => result = task.sync())
 
   def await(): Return = {
     thread.join()

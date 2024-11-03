@@ -71,6 +71,7 @@ lazy val benchmark = project.in(file("benchmark"))
     libraryDependencies ++= Seq(
       "org.openjdk.jmh" % "jmh-core" % "1.37",
       "org.openjdk.jmh" % "jmh-generator-annprocess" % "1.37",
-      "org.typelevel" %% "cats-effect" % "3.5.4"
+      "org.typelevel" %% "cats-effect" % "3.5.4",
+      "dev.zio" %% "zio" % "2.0.15"
     )
   )
