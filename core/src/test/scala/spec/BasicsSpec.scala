@@ -21,5 +21,12 @@ class BasicsSpec extends AnyWordSpec with Matchers {
       }
       s.await() should be("Value: 25")
     }
+    "handle flat mapping" in {
+      val task = (1 to 10).foldLeft(Task(0))((t, i) => t.flatMap { total =>
+        Task(total + i)
+      })
+      val result = task.await()
+      result should be(55)
+    }
   }
 }

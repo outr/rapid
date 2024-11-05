@@ -14,46 +14,55 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 class OverheadBenchmark {
   // Define the number of iterations
-  private val iterations = 1_000_000
+  private val iterations = 100_000
+//  private val iterations = 10
+  private val expected = 1_300_000
 
   // Simple computation to benchmark
   private def simpleComputation: Int = math.round(math.sqrt(163.0)).toInt
 
-  @Benchmark
-  def directBenchmark(): Int = {
+/*  @Benchmark
+  def directBenchmark(): Unit = {
     var result = 0
     for (_ <- 1 to iterations) {
       result += simpleComputation
     }
-    result
-  }
+    assert(result == expected)
+  }*/
 
-  @Benchmark
-  def ioBenchmark(): Int = {
-    var result = 0
-    for (_ <- 1 to iterations) {
-      result += IO.delay(simpleComputation).unsafeRunSync()
+  private def verify(name: String, result: Int): Unit = {
+    if (result != expected) {
+      println(s"$name - Expected: $expected, Got: $result")
+//      sys.exit(1)
     }
-    result
+  }
+
+  /*@Benchmark
+  def ioBenchmark(): Unit = {
+    val io = (1 to iterations).foldLeft(IO.pure(0))((io, i) => io.flatMap { total =>
+      IO(total + simpleComputation)
+    })
+    val result = io.unsafeRunSync()
+    verify("cats-effect", result)
   }
 
   @Benchmark
-  def zioBenchmark(): Int = {
-    var result = 0
+  def zioBenchmark(): Unit = {
+    val zio = (1 to iterations).foldLeft(ZIO.succeed(0))((t, i) => t.flatMap { total =>
+      ZIO.succeed(total + simpleComputation)
+    })
     val runtime = Runtime.default
-    for (_ <- 1 to iterations) {
-      result += Unsafe.unsafe(implicit u => runtime.unsafe.run(ZIO.attempt(simpleComputation)).getOrThrowFiberFailure())
-    }
-    result
-  }
+    val result = Unsafe.unsafe(implicit u => runtime.unsafe.run(zio).getOrThrowFiberFailure())
+    verify("ZIO", result)
+  }*/
 
   @Benchmark
-  def rapidBenchmark(): Int = {
-    var result = 0
-    val task = Task(simpleComputation)
-    for (_ <- 1 to iterations) {
-      result += task.await()
-    }
-    result
+  def rapidBenchmark(): Unit = {
+    val task = (1 to iterations).foldLeft(Task(0))((t, i) => t.flatMap { total =>
+      Task(total + simpleComputation)
+    })
+    val result = task.await()
+    println(s"Result: $result")
+    verify("Rapid", result)
   }
 }
