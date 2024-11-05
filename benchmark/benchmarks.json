@@ -1,0 +1,166 @@
+[
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "benchmark.OverheadBenchmark.ioBenchmark",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/home/mhicks/.sdkman/candidates/java/23.0.1-graalce/bin/java",
+        "jvmArgs" : [
+            "-XX:ThreadPriorityPolicy=1",
+            "-XX:+UnlockExperimentalVMOptions",
+            "-XX:+EnableJVMCIProduct",
+            "-XX:-UnlockExperimentalVMOptions",
+            "--add-exports=java.base/jdk.internal.misc=jdk.graal.compiler"
+        ],
+        "jdkVersion" : "23.0.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "23.0.1+11-jvmci-b01",
+        "warmupIterations" : 3,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "10 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 105.73115550392005,
+            "scoreError" : 809.0624741074554,
+            "scoreConfidence" : [
+                -703.3313186035354,
+                914.7936296113754
+            ],
+            "scorePercentiles" : {
+                "0.0" : 55.03741000549451,
+                "50.0" : 124.8087429404762,
+                "90.0" : 137.34731356578948,
+                "95.0" : 137.34731356578948,
+                "99.0" : 137.34731356578948,
+                "99.9" : 137.34731356578948,
+                "99.99" : 137.34731356578948,
+                "99.999" : 137.34731356578948,
+                "99.9999" : 137.34731356578948,
+                "100.0" : 137.34731356578948
+            },
+            "scoreUnit" : "ms/op",
+            "rawData" : [
+                [
+                    137.34731356578948,
+                    124.8087429404762,
+                    55.03741000549451
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "benchmark.OverheadBenchmark.rapidBenchmark",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/home/mhicks/.sdkman/candidates/java/23.0.1-graalce/bin/java",
+        "jvmArgs" : [
+            "-XX:ThreadPriorityPolicy=1",
+            "-XX:+UnlockExperimentalVMOptions",
+            "-XX:+EnableJVMCIProduct",
+            "-XX:-UnlockExperimentalVMOptions",
+            "--add-exports=java.base/jdk.internal.misc=jdk.graal.compiler"
+        ],
+        "jdkVersion" : "23.0.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "23.0.1+11-jvmci-b01",
+        "warmupIterations" : 3,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "10 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 23.7622666999513,
+            "scoreError" : 20.59345573878512,
+            "scoreConfidence" : [
+                3.16881096116618,
+                44.35572243873642
+            ],
+            "scorePercentiles" : {
+                "0.0" : 22.59959755079007,
+                "50.0" : 23.833373335664337,
+                "90.0" : 24.853829213399504,
+                "95.0" : 24.853829213399504,
+                "99.0" : 24.853829213399504,
+                "99.9" : 24.853829213399504,
+                "99.99" : 24.853829213399504,
+                "99.999" : 24.853829213399504,
+                "99.9999" : 24.853829213399504,
+                "100.0" : 24.853829213399504
+            },
+            "scoreUnit" : "ms/op",
+            "rawData" : [
+                [
+                    22.59959755079007,
+                    23.833373335664337,
+                    24.853829213399504
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "benchmark.OverheadBenchmark.zioBenchmark",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/home/mhicks/.sdkman/candidates/java/23.0.1-graalce/bin/java",
+        "jvmArgs" : [
+            "-XX:ThreadPriorityPolicy=1",
+            "-XX:+UnlockExperimentalVMOptions",
+            "-XX:+EnableJVMCIProduct",
+            "-XX:-UnlockExperimentalVMOptions",
+            "--add-exports=java.base/jdk.internal.misc=jdk.graal.compiler"
+        ],
+        "jdkVersion" : "23.0.1",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "23.0.1+11-jvmci-b01",
+        "warmupIterations" : 3,
+        "warmupTime" : "10 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "10 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 1869.2073498888888,
+            "scoreError" : 1080.074847418823,
+            "scoreConfidence" : [
+                789.1325024700657,
+                2949.2821973077116
+            ],
+            "scorePercentiles" : {
+                "0.0" : 1816.332609,
+                "50.0" : 1858.1195568333333,
+                "90.0" : 1933.1698838333334,
+                "95.0" : 1933.1698838333334,
+                "99.0" : 1933.1698838333334,
+                "99.9" : 1933.1698838333334,
+                "99.99" : 1933.1698838333334,
+                "99.999" : 1933.1698838333334,
+                "99.9999" : 1933.1698838333334,
+                "100.0" : 1933.1698838333334
+            },
+            "scoreUnit" : "ms/op",
+            "rawData" : [
+                [
+                    1858.1195568333333,
+                    1933.1698838333334,
+                    1816.332609
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    }
+]
+
+

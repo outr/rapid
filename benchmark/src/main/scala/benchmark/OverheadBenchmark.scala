@@ -14,9 +14,9 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 class OverheadBenchmark {
   // Define the number of iterations
-  private val iterations = 100_000
+  private val iterations = 1_000_000
 //  private val iterations = 10
-  private val expected = 1_300_000
+  private val expected = 13_000_000
 
   // Simple computation to benchmark
   private def simpleComputation: Int = math.round(math.sqrt(163.0)).toInt
@@ -37,7 +37,7 @@ class OverheadBenchmark {
     }
   }
 
-  /*@Benchmark
+  @Benchmark
   def ioBenchmark(): Unit = {
     val io = (1 to iterations).foldLeft(IO.pure(0))((io, i) => io.flatMap { total =>
       IO(total + simpleComputation)
@@ -54,7 +54,7 @@ class OverheadBenchmark {
     val runtime = Runtime.default
     val result = Unsafe.unsafe(implicit u => runtime.unsafe.run(zio).getOrThrowFiberFailure())
     verify("ZIO", result)
-  }*/
+  }
 
   @Benchmark
   def rapidBenchmark(): Unit = {
@@ -62,7 +62,6 @@ class OverheadBenchmark {
       Task(total + simpleComputation)
     })
     val result = task.await()
-    println(s"Result: $result")
     verify("Rapid", result)
   }
 }
