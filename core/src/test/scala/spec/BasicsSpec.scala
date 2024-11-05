@@ -1,6 +1,7 @@
 package spec
 
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
 
@@ -27,6 +28,16 @@ class BasicsSpec extends AnyWordSpec with Matchers {
       })
       val result = task.await()
       result should be(55)
+    }
+    "chain fibers together" in {
+      val start = System.currentTimeMillis()
+      Task.sleep(250.millis).start().flatMap { _ =>
+        Task.sleep(250.millis).start().flatMap { _ =>
+          Task.sleep(250.millis).start()
+        }
+      }.sync()
+      val elapsed = System.currentTimeMillis() - start
+      elapsed should be >= 750L
     }
   }
 }

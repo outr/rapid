@@ -3,14 +3,23 @@ package rapid
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration._
 
-class Fiber[Return](val task: Task[Return]) {
+class Fiber[Return](val task: Task[Return]) extends Task[Return] {
   private var result: Return = _
   private val thread = Thread
     .ofVirtual()
     .name(s"rapid-${Fiber.counter.incrementAndGet()}")
     .start(() => result = task.sync())
 
-  def await(): Return = {
+  override protected lazy val f: () => Return = () => {
+    thread.join()
+    result
+  }
+
+  override def sync(): Return = await()
+
+  override def start(): Fiber[Return] = this
+
+  override def await(): Return = {
     thread.join()
     result
   }
