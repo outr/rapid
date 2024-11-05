@@ -10,12 +10,7 @@ class Fiber[Return](val task: Task[Return]) extends Task[Return] {
     .name(s"rapid-${Fiber.counter.incrementAndGet()}")
     .start(() => result = task.sync())
 
-  override protected lazy val f: () => Return = () => {
-    thread.join()
-    result
-  }
-
-  override def sync(): Return = await()
+  override protected lazy val f: () => Return = () => await()
 
   override def start(): Fiber[Return] = this
 
