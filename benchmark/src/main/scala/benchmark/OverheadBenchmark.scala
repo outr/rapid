@@ -13,27 +13,14 @@ import java.util.concurrent.TimeUnit
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 class OverheadBenchmark {
-  // Define the number of iterations
   private val iterations = 1_000_000
-//  private val iterations = 10
   private val expected = 13_000_000
 
-  // Simple computation to benchmark
   private def simpleComputation: Int = math.round(math.sqrt(163.0)).toInt
-
-/*  @Benchmark
-  def directBenchmark(): Unit = {
-    var result = 0
-    for (_ <- 1 to iterations) {
-      result += simpleComputation
-    }
-    assert(result == expected)
-  }*/
 
   private def verify(name: String, result: Int): Unit = {
     if (result != expected) {
       println(s"$name - Expected: $expected, Got: $result")
-//      sys.exit(1)
     }
   }
 
