@@ -8,6 +8,7 @@ trait Task[Return] extends Any {
   def sync(): Return = f()
   def start(): Fiber[Return] = new Fiber(this)
   def await(): Return = start().await()
+  def attempt(): Either[Throwable, Return] = start().attempt()
   def map[T](f: Return => T): Task[T] = Task(f(this.f()))
   def flatMap[T](f: Return => Task[T]): Task[T] = ChainedTask(List(
     v => f(v.asInstanceOf[Return]).asInstanceOf[Task[Any]],
@@ -17,14 +18,8 @@ trait Task[Return] extends Any {
     Task.sleep(duration).map(_ => r)
   }
   def unit: Task[Unit] = map(_ => ())
-}
 
-class SimpleTask[Return](val f: () => Return) extends AnyVal with Task[Return]
-
-case class ChainedTask[Return](list: List[Any => Task[Any]]) extends Task[Return] {
-  override protected def f: () => Return = () => list.reverse.foldLeft((): Any)((value, f) => f(value).sync()).asInstanceOf[Return]
-
-  override def flatMap[T](f: Return => Task[T]): Task[T] = copy(f.asInstanceOf[Any => Task[Any]] :: list)
+  def toPull: Pull[Return] = Pull.suspend(Pull.output(sync()))
 }
 
 object Task {
@@ -33,4 +28,6 @@ object Task {
   def apply[Return](f: => Return): Task[Return] = new SimpleTask(() => f)
 
   def sleep(duration: FiniteDuration): Task[Unit] = apply(Thread.sleep(duration.toMillis))
+
+  def defer[Return](task: => Task[Return]): Task[Return] = Task(task.sync())
 }

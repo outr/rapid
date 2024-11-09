@@ -4,11 +4,15 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration._
 
 class Fiber[Return](val task: Task[Return]) extends Task[Return] {
-  private var result: Return = _
+  private var result: Either[Throwable, Return] = _
   private val thread = Thread
     .ofVirtual()
     .name(s"rapid-${Fiber.counter.incrementAndGet()}")
-    .start(() => result = task.sync())
+    .start(() => try {
+      result = Right(task.sync())
+    } catch {
+      case t: Throwable => result = Left(t)
+    })
 
   override protected lazy val f: () => Return = () => await()
 
@@ -16,11 +20,22 @@ class Fiber[Return](val task: Task[Return]) extends Task[Return] {
 
   override def await(): Return = {
     thread.join()
+    result match {
+      case Left(t) => throw t
+      case Right(r) => r
+    }
+  }
+
+  override def attempt(): Either[Throwable, Return] = {
+    thread.join()
     result
   }
 
   def await(duration: Duration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
-    Some(result)
+    result match {
+      case Left(t) => throw t
+      case Right(r) => Some(r)
+    }
   } else {
     None
   }
