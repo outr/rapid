@@ -14,11 +14,10 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
 class StreamBenchmark {
-  @Param(Array("1000")) //, "10000", "100000"))
+  @Param(Array("1000", "10000", "100000"))
   var size: Int = _
 
   lazy val rapidStream: rapid.Stream[Int] = rapid.Stream.fromList((1 to size).toList)
-  lazy val rapidFs2Stream: fs2.Stream[Task, Int] = fs2.Stream.emits(1 to size)
   lazy val fs2Stream: fs2.Stream[IO, Int] = fs2.Stream.emits(1 to size)
 
   @Setup(Level.Trial)
@@ -33,32 +32,27 @@ class StreamBenchmark {
   }
 
   @Benchmark
-  def rapidFs2StreamToList(): List[Int] = {
-    rapidFs2Stream.compile.toList.sync()
+  def fs2StreamToList(): List[Int] = {
+    fs2Stream.compile.toList.unsafeRunSync()
   }
-
-//  @Benchmark
-//  def fs2StreamToList(): List[Int] = {
-//    fs2Stream.compile.toList.unsafeRunSync()
-//  }
 
   @Benchmark
   def rapidStreamFilter(): List[Int] = {
     rapidStream.filter(_ % 2 == 0).toList.sync()
   }
 
-//  @Benchmark
-//  def fs2StreamFilter(): List[Int] = {
-//    fs2Stream.filter(_ % 2 == 0).compile.toList.unsafeRunSync()
-//  }
+  @Benchmark
+  def fs2StreamFilter(): List[Int] = {
+    fs2Stream.filter(_ % 2 == 0).compile.toList.unsafeRunSync()
+  }
 
   @Benchmark
   def rapidStreamMap(): List[Int] = {
     rapidStream.map(_ * 2).toList.sync()
   }
 
-//  @Benchmark
-//  def fs2StreamMap(): List[Int] = {
-//    fs2Stream.map(_ * 2).compile.toList.unsafeRunSync()
-//  }
+  @Benchmark
+  def fs2StreamMap(): List[Int] = {
+    fs2Stream.map(_ * 2).compile.toList.unsafeRunSync()
+  }
 }

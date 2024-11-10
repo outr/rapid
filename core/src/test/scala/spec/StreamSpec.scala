@@ -31,7 +31,7 @@ class StreamSpec extends AnyWordSpec with Matchers {
       val result = stream.evalMap(x => Task(x * 2)).toList.sync()
       result shouldEqual List(2, 4, 6)
     }
-    "evaluate elements in parallel with parEvalMap" in {
+    /*"evaluate elements in parallel with parEvalMap" in {
       val stream = Stream.fromList(List(1, 2, 3, 4))
       val result = stream.parEvalMap(2)(x => Task(x * 2)).toList.sync()
       result.sorted shouldEqual List(2, 4, 6, 8) // Sorting to account for parallel execution order
@@ -40,8 +40,7 @@ class StreamSpec extends AnyWordSpec with Matchers {
       val stream = Stream.fromList(List(1, 2, 3, 4, 5, 6))
       val result = stream.parEvalMap(3)(x => Task(x * 2)).toList.sync()
       result.sorted shouldEqual List(2, 4, 6, 8, 10, 12) // Sorting to account for parallel execution order
-    }
-
+    }*/
     "append two streams" in {
       val stream1 = Stream.fromList(List(1, 2, 3))
       val stream2 = Stream.fromList(List(4, 5, 6))

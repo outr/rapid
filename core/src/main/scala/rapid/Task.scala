@@ -8,14 +8,14 @@ import scala.concurrent.duration.FiniteDuration
  * @tparam Return the type of the result produced by this task
  */
 trait Task[Return] extends Any {
-  protected def f: () => Return
+  protected def invoke(): Return
 
   /**
    * Synchronously (blocking) executes the task and returns the result.
    *
    * @return the result of the task
    */
-  def sync(): Return = f()
+  def sync(): Return = invoke()
 
   /**
    * Starts the task and returns a `Fiber` representing the running task.
@@ -45,7 +45,7 @@ trait Task[Return] extends Any {
    * @tparam T the type of the transformed result
    * @return a new task with the transformed result
    */
-  def map[T](f: Return => T): Task[T] = Task(f(this.f()))
+  def map[T](f: Return => T): Task[T] = Task(f(invoke()))
 
   /**
    * Flat maps the result of the task using the given function.
@@ -54,7 +54,7 @@ trait Task[Return] extends Any {
    * @tparam T the type of the result of the new task
    * @return a new task with the transformed result
    */
-  def flatMap[T](f: Return => Task[T]): Task[T] = ChainedTask(List(
+  def flatMap[T](f: Return => Task[T]): Task[T] = Task.Chained(List(
     v => f(v.asInstanceOf[Return]).asInstanceOf[Task[Any]],
     (_: Any) => this.asInstanceOf[Task[Any]],
   ))
@@ -85,10 +85,33 @@ trait Task[Return] extends Any {
 }
 
 object Task {
+  case class Pure[Return](value: Return) extends AnyVal with Task[Return] {
+    override protected def invoke(): Return = value
+  }
+
+  case class Single[Return](f: () => Return) extends AnyVal with Task[Return] {
+    override protected def invoke(): Return = f()
+  }
+
+  case class Chained[Return](list: List[Any => Task[Any]]) extends AnyVal with Task[Return] {
+    override protected def invoke(): Return = list.reverse.foldLeft((): Any)((value, f) => f(value).sync()).asInstanceOf[Return]
+
+    override def flatMap[T](f: Return => Task[T]): Task[T] = copy(f.asInstanceOf[Any => Task[Any]] :: list)
+  }
+
   /**
    * A task that returns `Unit`.
    */
-  lazy val unit: Task[Unit] = apply(())
+  lazy val unit: Task[Unit] = pure(())
+
+  /**
+   * Creates a new task with the given value pre-evaluated.
+   *
+   * @param value the return value of this Task
+   * @tparam Return the type of the result produced by the task
+   * @return a new task
+   */
+  def pure[Return](value: Return): Task[Return] = Pure(value)
 
   /**
    * Creates a new task with the given function.
@@ -97,7 +120,7 @@ object Task {
    * @tparam Return the type of the result produced by the task
    * @return a new task
    */
-  def apply[Return](f: => Return): Task[Return] = new SimpleTask(() => f)
+  def apply[Return](f: => Return): Task[Return] = Single(() => f)
 
   /**
    * Creates a new task that sleeps for the given duration.

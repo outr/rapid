@@ -14,7 +14,7 @@ class Fiber[Return](val task: Task[Return]) extends Task[Return] {
       case t: Throwable => result = Left(t)
     })
 
-  override protected lazy val f: () => Return = () => await()
+  override protected def invoke(): Return = await()
 
   override def start(): Fiber[Return] = this
 
