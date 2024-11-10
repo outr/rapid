@@ -2,64 +2,122 @@ package rapid
 
 import java.util.concurrent.Semaphore
 
-trait Stream[A] {
-  def pull: Pull[Option[(A, Stream[A])]]
+/**
+ * Represents a pull-based stream of values of type `Return`.
+ *
+ * @tparam Return the type of the values produced by this stream
+ */
+trait Stream[Return] { stream =>
+  /**
+   * Produces the next value in the stream, if any.
+   *
+   * @return a `Pull` that produces an optional pair of the next value and the remaining stream
+   */
+  def pull: Pull[Option[(Return, Stream[Return])]]
 
-  def map[B](f: A => B): Stream[B] = new Stream[B] {
-    def pull: Pull[Option[(B, Stream[B])]] = Stream.this.pull.flatMap {
-      case Some((head, tail)) => Pull.output(Some(f(head) -> tail.map(f)))
-      case None => Pull.output(None)
+  /**
+   * Transforms the values in the stream using the given function.
+   *
+   * @param f the function to transform the values
+   * @tparam T the type of the transformed values
+   * @return a new stream with the transformed values
+   */
+  def map[T](f: Return => T): Stream[T] = new Stream[T] {
+    def pull: Pull[Option[(T, Stream[T])]] = stream.pull.flatMap {
+      case Some((head, tail)) => Pull.pure(Some(f(head) -> tail.map(f)))
+      case None => Pull.pure(None)
     }
   }
 
-  def flatMap[B](f: A => Stream[B]): Stream[B] = new Stream[B] {
-    def pull: Pull[Option[(B, Stream[B])]] = Stream.this.pull.flatMap {
+  /**
+   * Transforms the values in the stream using the given function that returns a new stream.
+   *
+   * @param f the function to transform the values into new streams
+   * @tparam T the type of the values in the new streams
+   * @return a new stream with the transformed values
+   */
+  def flatMap[T](f: Return => Stream[T]): Stream[T] = new Stream[T] {
+    def pull: Pull[Option[(T, Stream[T])]] = stream.pull.flatMap {
       case Some((head, tail)) => f(head).append(tail.flatMap(f)).pull
-      case None => Pull.output(None)
+      case None => Pull.pure(None)
     }
   }
 
-  def append[B >: A](that: => Stream[B]): Stream[B] = new Stream[B] {
-    def pull: Pull[Option[(B, Stream[B])]] = Stream.this.pull.flatMap {
-      case Some((head, tail)) => Pull.output(Some(head -> tail.append(that)))
+  /**
+   * Appends another stream to this stream.
+   *
+   * @param that the stream to append
+   * @tparam T the type of the values in the appended stream
+   * @return a new stream with the values from both streams
+   */
+  def append[T >: Return](that: => Stream[T]): Stream[T] = new Stream[T] {
+    def pull: Pull[Option[(T, Stream[T])]] = stream.pull.flatMap {
+      case Some((head, tail)) => Pull.pure(Some(head -> tail.append(that)))
       case None => that.pull
     }
   }
 
-  def takeWhile(p: A => Boolean): Stream[A] = new Stream[A] {
-    def pull: Pull[Option[(A, Stream[A])]] = Stream.this.pull.flatMap {
+  /**
+   * Takes values from the stream while the given predicate holds.
+   *
+   * @param p the predicate to test the values
+   * @return a new stream with the values that satisfy the predicate
+   */
+  def takeWhile(p: Return => Boolean): Stream[Return] = new Stream[Return] {
+    def pull: Pull[Option[(Return, Stream[Return])]] = stream.pull.flatMap {
       case Some((head, tail)) =>
-        if (p(head)) Pull.output(Some(head -> tail.takeWhile(p)))
-        else Pull.output(None)
-      case None => Pull.output(None)
+        if (p(head)) Pull.pure(Some(head -> tail.takeWhile(p)))
+        else Pull.pure(None)
+      case None => Pull.pure(None)
     }
   }
 
-  def filter(p: A => Boolean): Stream[A] = new Stream[A] {
-    def pull: Pull[Option[(A, Stream[A])]] = Stream.this.pull.flatMap {
+  /**
+   * Filters the values in the stream using the given predicate.
+   *
+   * @param p the predicate to test the values
+   * @return a new stream with the values that satisfy the predicate
+   */
+  def filter(p: Return => Boolean): Stream[Return] = new Stream[Return] {
+    def pull: Pull[Option[(Return, Stream[Return])]] = stream.pull.flatMap {
       case Some((head, tail)) =>
-        if (p(head)) Pull.output(Some(head -> tail.filter(p)))
+        if (p(head)) Pull.pure(Some(head -> tail.filter(p)))
         else tail.filter(p).pull
-      case None => Pull.output(None)
+      case None => Pull.pure(None)
     }
   }
 
-  def evalMap[B](f: A => Task[B]): Stream[B] = new Stream[B] {
-    def pull: Pull[Option[(B, Stream[B])]] = Stream.this.pull.flatMap {
+  /**
+   * Transforms the values in the stream using the given function that returns a task.
+   *
+   * @param f the function to transform the values into tasks
+   * @tparam T the type of the values in the tasks
+   * @return a new stream with the transformed values
+   */
+  def evalMap[T](f: Return => Task[T]): Stream[T] = new Stream[T] {
+    def pull: Pull[Option[(T, Stream[T])]] = stream.pull.flatMap {
       case Some((head, tail)) =>
         Pull.suspend {
           f(head).map(result => Option(result -> tail.evalMap(f))).toPull
         }
-      case None => Pull.output(None)
+      case None => Pull.pure(None)
     }
   }
 
-  def parEvalMap[B](maxConcurrency: Int)(f: A => Task[B]): Stream[B] = new Stream[B] {
+  /**
+   * Transforms the values in the stream using the given function that returns a task, with a maximum concurrency.
+   *
+   * @param maxConcurrency the maximum number of concurrent tasks
+   * @param f the function to transform the values into tasks
+   * @tparam T the type of the values in the tasks
+   * @return a new stream with the transformed values
+   */
+  def parEvalMap[T](maxConcurrency: Int)(f: Return => Task[T]): Stream[T] = new Stream[T] {
     val semaphore = new Semaphore(maxConcurrency)
 
-    def pull: Pull[Option[(B, Stream[B])]] = Pull.suspend {
+    def pull: Pull[Option[(T, Stream[T])]] = Pull.suspend {
       if (semaphore.tryAcquire()) {
-        Stream.this.pull.flatMap {
+        stream.pull.flatMap {
           case Some((head, tail)) =>
             val task = f(head)
             Pull.suspend {
@@ -70,7 +128,7 @@ trait Stream[A] {
             }
           case None =>
             semaphore.release()
-            Pull.output(None)
+            Pull.pure(None)
         }
       } else {
         Pull.suspend(pull)
@@ -78,27 +136,67 @@ trait Stream[A] {
     }
   }
 
-  def toList: Task[List[A]] = {
-    def loop(stream: Stream[A], acc: List[A]): Pull[List[A]] = {
+  /**
+   * Converts the stream to a list.
+   *
+   * @return a task that produces a list of the values in the stream
+   */
+  def toList: Task[List[Return]] = {
+    def loop(stream: Stream[Return], acc: List[Return]): Pull[List[Return]] = {
       stream.pull.flatMap {
         case Some((head, tail)) => Pull.suspend(loop(tail, acc :+ head))
-        case None => Pull.output(acc)
+        case None => Pull.pure(acc)
       }
     }
     loop(this, List.empty).toTask
   }
+
+  /**
+   * Counts the number of elements in the stream and fully evaluates it.
+   *
+   * @return a `Task[Int]` representing the total number of entries evaluated
+   */
+  def count: Task[Int] = {
+    def loop(stream: Stream[Return], acc: Int): Pull[Int] = {
+      stream.pull.flatMap {
+        case Some((_, tail)) => Pull.suspend(loop(tail, acc + 1))
+        case None => Pull.pure(acc)
+      }
+    }
+    loop(this, 0).toTask
+  }
 }
 
 object Stream {
-  def emit[A](value: A): Stream[A] = new Stream[A] {
-    def pull: Pull[Option[(A, Stream[A])]] = Pull.output(Some(value -> empty))
+  /**
+   * Creates a stream that emits a single value.
+   *
+   * @param value the value to emit
+   * @tparam Return the type of the value
+   * @return a new stream that emits the value
+   */
+  def emit[Return](value: Return): Stream[Return] = new Stream[Return] {
+    def pull: Pull[Option[(Return, Stream[Return])]] = Pull.pure(Some(value -> empty))
   }
 
-  def empty[A]: Stream[A] = new Stream[A] {
-    def pull: Pull[Option[(A, Stream[A])]] = Pull.output(None)
+  /**
+   * Creates an empty stream.
+   *
+   * @tparam Return the type of the values in the stream
+   * @return a new empty stream
+   */
+  def empty[Return]: Stream[Return] = new Stream[Return] {
+    def pull: Pull[Option[(Return, Stream[Return])]] = Pull.pure(None)
   }
 
-  def fromList[A](list: List[A]): Stream[A] = list match {
+  /**
+   * Creates a stream from a list of values.
+   *
+   * @param list the list of values
+   * @tparam Return the type of the values
+   * @return a new stream that emits the values in the list
+   */
+  def fromList[Return](list: List[Return]): Stream[Return] = list match {
     case Nil => empty
     case head :: tail => Stream.emit(head).append(fromList(tail))
   }
