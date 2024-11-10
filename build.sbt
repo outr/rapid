@@ -80,13 +80,14 @@ lazy val cats = project.in(file("cats"))
 
 lazy val benchmark = project.in(file("benchmark"))
   .enablePlugins(JmhPlugin)
-  .dependsOn(core)
+  .dependsOn(core, cats)
   .settings(
     name := s"$projectName-benchmark",
     libraryDependencies ++= Seq(
       "org.openjdk.jmh" % "jmh-core" % "1.37",
       "org.openjdk.jmh" % "jmh-generator-annprocess" % "1.37",
-      "org.typelevel" %% "cats-effect" % "3.5.4",
+      "org.typelevel" %% "cats-effect" % catsVersion,
+      "co.fs2" %% "fs2-core" % fs2Version,
       "dev.zio" %% "zio" % "2.0.15"
     )
   )

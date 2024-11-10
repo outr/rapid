@@ -37,9 +37,15 @@ trait Stream[Return] { stream =>
    * @return a new stream with the transformed values
    */
   def flatMap[T](f: Return => Stream[T]): Stream[T] = new Stream[T] {
-    def pull: Pull[Option[(T, Stream[T])]] = stream.pull.flatMap {
-      case Some((head, tail)) => f(head).append(tail.flatMap(f)).pull
-      case None => Pull.pure(None)
+    def pull: Pull[Option[(T, Stream[T])]] = {
+      def go(s: Stream[Return]): Pull[Option[(T, Stream[T])]] = s.pull.flatMap {
+        case Some((head, tail)) => f(head).pull.flatMap {
+          case Some((fh, ft)) => Pull.pure(Some(fh -> ft.append(tail.flatMap(f))))
+          case None => go(tail)
+        }
+        case None => Pull.pure(None)
+      }
+      go(stream)
     }
   }
 
@@ -79,11 +85,16 @@ trait Stream[Return] { stream =>
    * @return a new stream with the values that satisfy the predicate
    */
   def filter(p: Return => Boolean): Stream[Return] = new Stream[Return] {
-    def pull: Pull[Option[(Return, Stream[Return])]] = stream.pull.flatMap {
-      case Some((head, tail)) =>
-        if (p(head)) Pull.pure(Some(head -> tail.filter(p)))
-        else tail.filter(p).pull
-      case None => Pull.pure(None)
+    def pull: Pull[Option[(Return, Stream[Return])]] = {
+      def go(s: Stream[Return]): Pull[Option[(Return, Stream[Return])]] = s.pull.flatMap {
+        case Some((head, tail)) =>
+          if (p(head)) Pull.pure(Some(head -> new Stream[Return] {
+            def pull: Pull[Option[(Return, Stream[Return])]] = go(tail)
+          }))
+          else go(tail)
+        case None => Pull.pure(None)
+      }
+      go(stream)
     }
   }
 
