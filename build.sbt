@@ -45,10 +45,14 @@ ThisBuild / outputStrategy := Some(StdoutOutput)
 
 ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
 
+val catsVersion: String = "3.5.5"
+
+val fs2Version: String = "3.11.0"
+
 val scalaTestVersion: String = "3.2.19"
 
 lazy val root = project.in(file("."))
-  .aggregate(core)
+  .aggregate(core, cats)
   .settings(
     name := projectName,
     publish := {},
@@ -59,6 +63,17 @@ lazy val core = project.in(file("core"))
   .settings(
     name := s"$projectName-core",
     libraryDependencies ++= Seq(
+      "org.scalatest" %% "scalatest" % scalaTestVersion % Test
+    )
+  )
+
+lazy val cats = project.in(file("cats"))
+  .dependsOn(core)
+  .settings(
+    name := s"$projectName-cats",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "cats-effect" % catsVersion,
+      "co.fs2" %% "fs2-core" % fs2Version,
       "org.scalatest" %% "scalatest" % scalaTestVersion % Test
     )
   )
