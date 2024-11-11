@@ -149,8 +149,5 @@ object Stream {
    * @tparam Return the type of the values
    * @return a new stream that emits the values in the list
    */
-  def fromList[Return](list: List[Return]): Stream[Return] = list match {
-    case Nil => empty
-    case head :: tail => Stream.emit(head).append(fromList(tail))
-  }
+  def fromList[Return](list: List[Return]): Stream[Return] = new Stream[Return](Task.pure(list.iterator))
 }
