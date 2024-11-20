@@ -45,7 +45,7 @@ ThisBuild / outputStrategy := Some(StdoutOutput)
 
 ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
 
-val catsVersion: String = "3.5.5"
+val catsVersion: String = "3.5.6"
 
 val fs2Version: String = "3.11.0"
 
