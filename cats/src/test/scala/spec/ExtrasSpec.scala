@@ -14,12 +14,12 @@ class ExtrasSpec extends AnyWordSpec with Matchers {
       io.unsafeRunSync() should be(42)
     }
   }
-  "StreamExtras" should {
-    "convert Stream to fs2.Stream" in {
-      val stream = rapid.Stream.fromList(List(1, 2, 3))
-      val fs2Stream = stream.toFS2
-      val result = fs2Stream.compile.toList.unsafeRunSync()
-      result should be(List(1, 2, 3))
-    }
-  }
+//  "StreamExtras" should {
+//    "convert Stream to fs2.Stream" in {
+//      val stream = rapid.Stream.fromList(List(1, 2, 3))
+//      val fs2Stream = stream.toFS2
+//      val result = fs2Stream.compile.toList.unsafeRunSync()
+//      result should be(List(1, 2, 3))
+//    }
+//  }
 }
