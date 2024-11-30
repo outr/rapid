@@ -31,5 +31,16 @@ class TaskSpec extends AnyWordSpec with Matchers {
       val elapsed = System.currentTimeMillis() - start
       elapsed should be >= 500L
     }
+    "utilize completable" in {
+      val start = System.currentTimeMillis()
+      val c = Task.completable[String]
+      Task.sleep(500.millis).map { _ =>
+        c.complete("Success!")
+      }.start()
+      val result = c.await()
+      result should be("Success!")
+      val elapsed = System.currentTimeMillis() - start
+      elapsed should be >= 500L
+    }
   }
 }

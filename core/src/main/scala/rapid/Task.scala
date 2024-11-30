@@ -99,6 +99,22 @@ object Task {
     override def flatMap[T](f: Return => Task[T]): Task[T] = copy(f.asInstanceOf[Any => Task[Any]] :: list)
   }
 
+  class Completable[Return] extends Task[Return] {
+    @volatile private var result: Option[Return] = None
+
+    def complete(result: Return): Unit = synchronized {
+      this.result = Some(result)
+      notifyAll()
+    }
+
+    override protected def invoke(): Return = synchronized {
+      while (result.isEmpty) {
+        wait()
+      }
+      result.get
+    }
+  }
+
   /**
    * A task that returns `Unit`.
    */
@@ -121,6 +137,14 @@ object Task {
    * @return a new task
    */
   def apply[Return](f: => Return): Task[Return] = Single(() => f)
+
+  /**
+   * Creates a new Completable task.
+   *
+   * @tparam Return the type of the result produced by the task
+   * @return a new Completable task
+   */
+  def completable[Return]: Completable[Return] = new Completable
 
   /**
    * Creates a new task that sleeps for the given duration.
