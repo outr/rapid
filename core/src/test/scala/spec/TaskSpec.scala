@@ -42,5 +42,15 @@ class TaskSpec extends AnyWordSpec with Matchers {
       val elapsed = System.currentTimeMillis() - start
       elapsed should be >= 500L
     }
+    "utilize for-comprehension" in {
+      val result = for {
+        one <- Task.sleep(250.millis).map { _ =>
+          1
+        }
+        two <- Task(2)
+        three <- Task.pure(3)
+      } yield one + two + three
+      result.sync() should be(6)
+    }
   }
 }
