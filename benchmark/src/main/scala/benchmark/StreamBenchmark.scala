@@ -14,10 +14,10 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
 class StreamBenchmark {
-  @Param(Array("1000")) //, "10000", "100000"))
+  @Param(Array("1000", "10000", "100000"))
   var size: Int = _
 
-  lazy val rapidStream: rapid.Stream[Int] = rapid.Stream.fromList((1 to size).toList)
+  lazy val rapidStream: rapid.Stream[Int] = rapid.Stream.emits(1 to size)
   lazy val fs2Stream: fs2.Stream[IO, Int] = fs2.Stream.emits(1 to size)
 
   @Setup(Level.Trial)

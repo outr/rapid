@@ -7,3 +7,4 @@ hs_err_pid*
 target/
 /.idea/
 /.bsp/
+/benchmark/benchmarks.json

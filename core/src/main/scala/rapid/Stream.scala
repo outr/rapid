@@ -143,11 +143,13 @@ object Stream {
   def empty[Return]: Stream[Return] = new Stream[Return](Task.pure(Nil.iterator))
 
   /**
-   * Creates a stream from a list of values.
+   * Creates a stream from a sequence of values.
    *
-   * @param list the list of values
+   * @param seq the sequence of values
    * @tparam Return the type of the values
-   * @return a new stream that emits the values in the list
+   * @return a new stream that emits the values in the sequence
    */
-  def fromList[Return](list: List[Return]): Stream[Return] = new Stream[Return](Task(list.iterator))
+  def emits[Return](seq: Seq[Return]): Stream[Return] = new Stream[Return](Task(seq.iterator))
+
+  def task[Return](stream: Stream[Return]): Task[Iterator[Return]] = stream.task
 }

@@ -11,6 +11,13 @@ trait Task[Return] extends Any {
   protected def invoke(): Return
 
   /**
+   * Synonym for sync(). Allows for clean usage with near transparent invocations.
+   *
+   * @return the result of the task
+   */
+  def apply(): Return = sync()
+
+  /**
    * Synchronously (blocking) executes the task and returns the result.
    *
    * @return the result of the task
