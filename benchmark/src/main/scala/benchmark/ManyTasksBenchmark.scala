@@ -37,9 +37,9 @@ class ManyTasksBenchmark {
   @Benchmark
   def zioBenchmark(): Unit = {
     val completed = new AtomicInteger(0)
-    val runtime = Runtime.default
     (1 to tasks).foreach { _ =>
-      val zio = ZIO.succeed(simpleComputation).map(_ => completed.incrementAndGet())
+      val runtime = Runtime.default
+      val zio = ZIO.succeedBlocking(simpleComputation).map(_ => completed.incrementAndGet())
       Unsafe.unsafe(implicit u => runtime.unsafe.fork(zio))
     }
     waitForComplete(completed)

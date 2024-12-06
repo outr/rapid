@@ -1,6 +1,7 @@
 package rapid
 
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
 
 /**
  * Represents a task that can be executed to produce a result of type `Return`.
@@ -43,7 +44,7 @@ trait Task[Return] extends Any {
    *
    * @return either the result of the task or an exception
    */
-  def attempt(): Either[Throwable, Return] = start().attempt()
+  def attempt(): Try[Return] = start().attempt()
 
   /**
    * Transforms the result of the task using the given function.
