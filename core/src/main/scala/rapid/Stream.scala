@@ -81,6 +81,15 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @return a `Task[Int]` representing the total number of entries evaluated
    */
   def count: Task[Int] = task.map(_.size)
+
+  def par[R](maxThreads: Int = ParallelStream.DefaultMaxThreads,
+             maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
+            (f: Return => Task[R]): ParallelStream[Return, R] = ParallelStream(
+    stream = this,
+    f = f,
+    maxThreads = maxThreads,
+    maxBuffer = maxBuffer
+  )
 }
 
 /*trait Stream[Return] { stream =>
