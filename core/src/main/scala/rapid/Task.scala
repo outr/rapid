@@ -1,7 +1,7 @@
 package rapid
 
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 /**
  * Represents a task that can be executed to produce a result of type `Return`.
@@ -45,6 +45,18 @@ trait Task[Return] extends Any {
    * @return either the result of the task or an exception
    */
   def attempt(): Try[Return] = start().attempt()
+
+  /**
+   * Handles error in task execution.
+   *
+   * @param f handler
+   * @return Task[Return]
+   */
+  def handleError(f: Throwable => Task[Return]): Task[Return] = Task(attempt())
+    .flatMap {
+      case Success(r) => Task.pure(r)
+      case Failure(t) => f(t)
+    }
 
   /**
    * Transforms the result of the task using the given function.

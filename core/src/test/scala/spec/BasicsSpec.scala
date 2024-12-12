@@ -39,5 +39,13 @@ class BasicsSpec extends AnyWordSpec with Matchers {
       val elapsed = System.currentTimeMillis() - start
       elapsed should be >= 750L
     }
+    "throw an error and recover" in {
+      val result = Task[String](throw new RuntimeException("Die Die Die"))
+        .handleError { _ =>
+          Task.pure("Recovered")
+        }
+        .sync()
+      result should be("Recovered")
+    }
   }
 }

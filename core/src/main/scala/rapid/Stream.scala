@@ -1,6 +1,8 @@
 package rapid
 
-import java.util.concurrent.Semaphore
+import java.io.{File, FileInputStream, InputStream}
+import java.nio.file.Path
+import scala.io.Source
 
 /**
  * Represents a pull-based stream of values of type `Return`.
@@ -159,6 +161,52 @@ object Stream {
    * @return a new stream that emits the values in the sequence
    */
   def emits[Return](seq: Seq[Return]): Stream[Return] = new Stream[Return](Task(seq.iterator))
+
+  /**
+   * Creates a Byte stream from the NIO Path
+   *
+   * @param path the path to the file
+   * @return a new stream that emits Bytes
+   */
+  def fromPath(path: Path): Stream[Byte] = fromFile(path.toFile)
+
+  /**
+   * Creates a Byte stream from the Java File
+   *
+   * @param file the file to load
+   * @return a new stream that emits Bytes
+   */
+  def fromFile(file: File): Stream[Byte] = fromInputStream(Task(new FileInputStream(file)))
+
+  /**
+   * Creates a Byte stream from the InputStream task
+   *
+   * @param input the InputStream task
+   * @return a new stream that emits Bytes
+   */
+  def fromInputStream(input: Task[InputStream]): Stream[Byte] = new Stream[Byte](input.map { is =>
+    var finished = false
+
+    val baseIterator = Iterator.continually(is.read())
+      .takeWhile(_ != -1)
+      .map(_.toByte)
+
+    new Iterator[Byte] {
+      def hasNext: Boolean = {
+        val hasMore = baseIterator.hasNext
+        if (!hasMore && !finished) {
+          finished = true
+          is.close()
+        }
+        hasMore
+      }
+
+      def next(): Byte = {
+        if (!hasNext) throw new NoSuchElementException
+        baseIterator.next()
+      }
+    }
+  })
 
   def task[Return](stream: Stream[Return]): Task[Iterator[Return]] = stream.task
 }
