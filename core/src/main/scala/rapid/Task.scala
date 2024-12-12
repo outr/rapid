@@ -1,5 +1,6 @@
 package rapid
 
+import scala.collection.BuildFrom
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
@@ -182,4 +183,19 @@ object Task {
    * @return a new task that defers the execution of the given task
    */
   def defer[Return](task: => Task[Return]): Task[Return] = Task(task.sync())
+
+  /**
+   * Converts a sequence of Task[Return] to a Task that returns a sequence of Return. Generally cleaner usage via the
+   * implicit in rapid on seq.tasks.
+   */
+  def sequence[Return, C[_]](tasks: C[Task[Return]])
+                            (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
+                                      asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = {
+    val empty = bf.newBuilder(tasks)
+    Task {
+      asIterable(tasks).foldLeft(empty) {
+        case (builder, task) => builder.addOne(task.sync())
+      }.result()
+    }
+  }
 }

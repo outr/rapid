@@ -47,5 +47,11 @@ class BasicsSpec extends AnyWordSpec with Matchers {
         .sync()
       result should be("Recovered")
     }
+    "process a list of tasks to a task with a list" in {
+      val list = List(
+        Task("One"), Task("Two"), Task("Three")
+      )
+      list.tasks.sync() should be(List("One", "Two", "Three"))
+    }
   }
 }

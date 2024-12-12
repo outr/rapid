@@ -20,7 +20,7 @@ ThisBuild / organization := org
 ThisBuild / version := "0.2.0-SNAPSHOT"
 ThisBuild / scalaVersion := scala213
 ThisBuild / crossScalaVersions := allScalaVersions
-ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation")
+ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
 
 ThisBuild / sonatypeCredentialHost := "s01.oss.sonatype.org"
 ThisBuild / sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
