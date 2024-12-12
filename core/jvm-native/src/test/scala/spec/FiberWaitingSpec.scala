@@ -1,24 +1,17 @@
 package spec
 
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
-import rapid.{Fiber, Task}
-import scala.concurrent.duration._
+import org.scalatest.wordspec.AnyWordSpec
+import rapid.Task
 
-class FiberSpec extends AnyWordSpec with Matchers {
-  "Fiber" should {
-    "start and await a task" in {
-      val task = Task { 5 * 5 }
-      val fiber = task.start()
-      fiber.await() shouldEqual 25
-    }
-    "handle task failures in fibers" in {
-      val task = Task { throw new RuntimeException("Failure") }
-      val fiber = task.start()
-      an[RuntimeException] should be thrownBy fiber.await()
-    }
+import scala.concurrent.duration.DurationInt
+
+class FiberWaitingSpec extends AnyWordSpec with Matchers {
+  "Fiber waiting" should {
     "await with a timeout" in {
-      val task = Task { Thread.sleep(1000); 42 }
+      val task = Task {
+        Thread.sleep(1000); 42
+      }
       val fiber = task.start()
       fiber.await(500.millis) shouldEqual None
       fiber.await(1500.millis) shouldEqual Some(42)

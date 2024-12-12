@@ -1,8 +1,9 @@
 package spec
 
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 import rapid.Task
+
 import scala.concurrent.duration._
 
 class TaskSpec extends AnyWordSpec with Matchers {

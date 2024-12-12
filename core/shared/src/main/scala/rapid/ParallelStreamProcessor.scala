@@ -1,17 +1,20 @@
 package rapid
 
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
-
 
 case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
                                          handle: R => Unit,
                                          complete: Int => Unit) {
-  private val iterator = Stream.task(stream.stream)
+  private val iteratorTask: Task[Iterator[T]] = Stream.task(stream.stream)
+
   private val ready = new AtomicIndexedQueue[R](stream.maxBuffer)
   private val processing = new ConcurrentLinkedQueue[(Int, Task[R])]
-  // Push iterator into processing queue
-  private val queuingFiber: Fiber[Unit] = Stream.task(stream.stream).map { iterator =>
+  @volatile private var _total = -1
+
+  // Start a fiber that consumes the stream and queues tasks
+  private val queuingFiber: Fiber[Unit] = iteratorTask.map { iterator =>
     var total = 0
     iterator.zipWithIndex.foreach {
       case (t, index) =>
@@ -20,35 +23,34 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
     }
     _total = total
   }.start()
-  @volatile private var _total = -1
 
   def total: Option[Int] = if (_total == -1) None else Some(_total)
 
-  // Create maxThreads threads to execute from processing and put into ready
+  // Spawn worker fibers to process tasks
   (0 until stream.maxThreads).foreach { _ =>
     Task(processRecursive()).start()
   }
 
   @tailrec
   private def processRecursive(): Unit = {
-    // Grab next processing and execute
-    val next = processing.poll
+    val next = processing.poll()
     if (next != null) {
       val (index, task) = next
       val result = task.sync()
-      // Put into ready
       ready.add(index, result)
     } else {
-      Thread.sleep(1)
+      // No next task
+      Thread.sleep(1) // Consider a better signaling mechanism
     }
+    // If total known and no more tasks, stop recursion
     if (_total != -1 && processing.isEmpty) {
-      // Stop
+      // Done processing
     } else {
       processRecursive()
     }
   }
 
-  // Monitor position and push results
+  // Fiber to consume results from 'ready' and handle them
   Task {
     var count = 0
     while (_total == -1 || count < _total) {
@@ -56,10 +58,11 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
         case Some(r) =>
           handle(r)
           count += 1
-        case None => Thread.sleep(1)
+        case None =>
+          // No result ready yet
+          Thread.sleep(1) // Again, consider using proper synchronization
       }
     }
     complete(_total)
   }.start()
 }
-

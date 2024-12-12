@@ -1,16 +1,17 @@
 package rapid
 
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration.Duration
-import scala.util.Try
+import scala.concurrent.Future
+import scala.util.{Failure, Try}
 
-class FutureFiber[Return](val task: Task[Return]) extends BlockableFiber[Return] {
-  private val future: Future[Return] = Future(task.sync())
+class FutureFiber[Return](val task: Task[Return]) extends Fiber[Return] {
+  private val future: Future[Return] = Future(task.sync())(Platform.executionContext)
 
   override protected def invoke(): Return = await()
 
-  override def await(): Return = await(Duration.Inf).get
+  override def attempt(): Try[Return] = future.value match {
+    case Some(value) => value
+    case None => Failure(new RuntimeException("Cannot wait"))
+  }
 
-  override def await(duration: Duration): Option[Return] = Try(Await.result(future, duration)).toOption
+  override def await(): Return = attempt().get
 }

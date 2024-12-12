@@ -49,6 +49,8 @@ val catsVersion: String = "3.5.7"
 
 val fs2Version: String = "3.11.0"
 
+val scalaJsMacrotaskVersion: String = "1.1.1"
+
 val scalaTestVersion: String = "3.2.19"
 
 lazy val root = project.in(file("."))
@@ -65,6 +67,11 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     name := s"$projectName-core",
     libraryDependencies ++= Seq(
       "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
+    )
+  )
+  .jsSettings(
+    libraryDependencies ++= Seq(
+      "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion,
     )
   )
 
