@@ -37,6 +37,11 @@ class StreamBenchmark {
   }
 
   @Benchmark
+  def rapidParallelStreamToList(): List[Int] = {
+    verify(rapidStream.par()(Task.pure).toList.sync())
+  }
+
+  @Benchmark
   def fs2StreamToList(): List[Int] = {
     verify(fs2Stream.compile.toList.unsafeRunSync())
   }
@@ -47,6 +52,11 @@ class StreamBenchmark {
   }
 
   @Benchmark
+  def rapidParallelStreamFilter(): List[Int] = {
+    verify(rapidStream.filter(_ % 2 == 0).par()(Task.pure).toList.sync(), size / 2)
+  }
+
+  @Benchmark
   def fs2StreamFilter(): List[Int] = {
     verify(fs2Stream.filter(_ % 2 == 0).compile.toList.unsafeRunSync(), size / 2)
   }
@@ -54,6 +64,11 @@ class StreamBenchmark {
   @Benchmark
   def rapidStreamMap(): List[Int] = {
     verify(rapidStream.map(_ * 2).toList.sync())
+  }
+
+  @Benchmark
+  def rapidParallelStreamMap(): List[Int] = {
+    verify(rapidStream.par()(i => Task(i * 2)).toList.sync())
   }
 
   @Benchmark
