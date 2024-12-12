@@ -1,8 +1,8 @@
 package spec
 
-import org.scalatest.wordspec.AnyWordSpec
-import org.scalatest.matchers.should.Matchers
 import cats.effect.unsafe.implicits.global
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 import rapid.Task
 import rapid.cats._
 

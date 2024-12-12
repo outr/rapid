@@ -15,11 +15,6 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends BlockableFiber[
     result.get
   }
 
-  override def attempt(): Try[Return] = {
-    thread.join()
-    result
-  }
-
   override def await(duration: Duration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
     Some(result.get)
   } else {

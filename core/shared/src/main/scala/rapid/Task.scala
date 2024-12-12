@@ -45,7 +45,9 @@ trait Task[Return] extends Any {
    *
    * @return either the result of the task or an exception
    */
-  def attempt(): Try[Return] = start().attempt()
+  def attempt(): Task[Try[Return]] = Task {
+    Try(invoke())
+  }
 
   /**
    * Handles error in task execution.
@@ -53,11 +55,22 @@ trait Task[Return] extends Any {
    * @param f handler
    * @return Task[Return]
    */
-  def handleError(f: Throwable => Task[Return]): Task[Return] = Task(attempt())
+  def handleError(f: Throwable => Task[Return]): Task[Return] = attempt()
     .flatMap {
       case Success(r) => Task.pure(r)
       case Failure(t) => f(t)
     }
+
+  /**
+   * Guarantees execution even if there's an exception at a higher level
+   *
+   * @param task the task to guarantee invocation of
+   */
+  def guarantee(task: Task[Unit]): Task[Return] = attempt()
+    .flatTap { _ =>
+      task
+    }
+    .map(_.get)
 
   /**
    * Transforms the result of the task using the given function.
@@ -79,6 +92,16 @@ trait Task[Return] extends Any {
     v => f(v.asInstanceOf[Return]).asInstanceOf[Task[Any]],
     (_: Any) => this.asInstanceOf[Task[Any]],
   ))
+
+  /**
+   * Similar to flatMap, but ignores the return propagating the current return value on.
+   *
+   * @param f the function to handle the result
+   * @return existing signature
+   */
+  def flatTap(f: Return => Task[Unit]): Task[Return] = flatMap { r =>
+    f(r).map(_ => r)
+  }
 
   /**
    * Chains a sleep to the end of this task.

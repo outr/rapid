@@ -9,11 +9,6 @@ class FutureBlockableFiber[Return](val task: Task[Return]) extends BlockableFibe
 
   override protected def invoke(): Return = await()
 
-  override def attempt(): Try[Return] = future.value match {
-    case Some(value) => value
-    case None => Try(Await.result(future, Duration.Inf))
-  }
-
   override def await(): Return = Await.result(future, Duration.Inf)
 
   override def await(duration: Duration): Option[Return] = Try(Await.result(future, duration)) match {

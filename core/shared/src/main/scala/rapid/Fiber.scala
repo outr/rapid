@@ -7,8 +7,6 @@ trait Fiber[Return] extends Task[Return] {
   override def start(): Fiber[Return] = this
 
   override def await(): Return = invoke()
-
-  override def attempt(): Try[Return] = Try(invoke())
 }
 
 object Fiber {
