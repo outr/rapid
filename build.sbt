@@ -52,35 +52,37 @@ val fs2Version: String = "3.11.0"
 val scalaTestVersion: String = "3.2.19"
 
 lazy val root = project.in(file("."))
-  .aggregate(core, cats)
+  .aggregate(core.jvm, core.js, core.native, cats.jvm, cats.js)
   .settings(
     name := projectName,
     publish := {},
     publishLocal := {}
   )
 
-lazy val core = project.in(file("core"))
+lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Full)
   .settings(
     name := s"$projectName-core",
     libraryDependencies ++= Seq(
-      "org.scalatest" %% "scalatest" % scalaTestVersion % Test
+      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
     )
   )
 
-lazy val cats = project.in(file("cats"))
+lazy val cats = crossProject(JVMPlatform, JSPlatform)
+  .crossType(CrossType.Full)
   .dependsOn(core)
   .settings(
     name := s"$projectName-cats",
     libraryDependencies ++= Seq(
-      "org.typelevel" %% "cats-effect" % catsVersion,
-      "co.fs2" %% "fs2-core" % fs2Version,
-      "org.scalatest" %% "scalatest" % scalaTestVersion % Test
+      "org.typelevel" %%% "cats-effect" % catsVersion,
+      "co.fs2" %%% "fs2-core" % fs2Version,
+      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
     )
   )
 
 lazy val benchmark = project.in(file("benchmark"))
   .enablePlugins(JmhPlugin)
-  .dependsOn(core, cats)
+  .dependsOn(core.jvm, cats.jvm)
   .settings(
     name := s"$projectName-benchmark",
     libraryDependencies ++= Seq(

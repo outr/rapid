@@ -31,7 +31,7 @@ trait Task[Return] extends Any {
    *
    * @return a `Fiber` representing the running task
    */
-  def start(): Fiber[Return] = new Fiber(this)
+  def start(): Fiber[Return] = Platform.createFiber(this)
 
   /**
    * Awaits (blocking) the completion of the task and returns the result.
@@ -88,6 +88,16 @@ trait Task[Return] extends Any {
    */
   def sleep(duration: FiniteDuration): Task[Return] = flatMap { r =>
     Task.sleep(duration).map(_ => r)
+  }
+
+  /**
+   * Convenience conditional execution of the Task. If the condition is true, the task will execute the instruction set,
+   * but if false, it will immediately return upon execution doing nothing.
+   */
+  def when(condition: Boolean): Task[Unit] = if (condition) {
+    this.unit
+  } else {
+    Task.unit
   }
 
   /**
