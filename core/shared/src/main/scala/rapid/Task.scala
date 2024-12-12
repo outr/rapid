@@ -154,10 +154,15 @@ object Task {
   }
 
   class Completable[Return] extends Task[Return] {
-    @volatile private var result: Option[Return] = None
+    @volatile private var result: Option[Try[Return]] = None
 
-    def complete(result: Return): Unit = synchronized {
-      this.result = Some(result)
+    def success(result: Return): Unit = synchronized {
+      this.result = Some(Success(result))
+      notifyAll()
+    }
+
+    def failure(throwable: Throwable): Unit = synchronized {
+      this.result = Some(Failure(throwable))
       notifyAll()
     }
 
@@ -165,7 +170,7 @@ object Task {
       while (result.isEmpty) {
         wait()
       }
-      result.get
+      result.get.get
     }
   }
 

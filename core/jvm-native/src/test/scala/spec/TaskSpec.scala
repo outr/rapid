@@ -36,7 +36,7 @@ class TaskSpec extends AnyWordSpec with Matchers {
       val start = System.currentTimeMillis()
       val c = Task.completable[String]
       Task.sleep(500.millis).map { _ =>
-        c.complete("Success!")
+        c.success("Success!")
       }.start()
       val result = c.await()
       result should be("Success!")

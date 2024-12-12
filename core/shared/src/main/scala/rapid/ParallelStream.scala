@@ -15,7 +15,7 @@ case class ParallelStream[T, R](stream: Stream[T],
     ParallelStreamProcessor(
       stream = this,
       handle = (_: R) => (),
-      complete = (_: Int) => completable.complete(())
+      complete = (_: Int) => completable.success(())
     )
     completable
   }
@@ -25,7 +25,7 @@ case class ParallelStream[T, R](stream: Stream[T],
     ParallelStreamProcessor(
       stream = this,
       handle = (_: R) => (),
-      complete = completable.complete
+      complete = completable.success
     )
     completable
   }
@@ -36,7 +36,7 @@ case class ParallelStream[T, R](stream: Stream[T],
     ParallelStreamProcessor(
       stream = this,
       handle = list.addOne,
-      complete = (_: Int) => completable.complete(list.toList)
+      complete = (_: Int) => completable.success(list.toList)
     )
     completable
   }
