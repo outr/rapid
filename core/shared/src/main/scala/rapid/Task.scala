@@ -129,13 +129,6 @@ trait Task[Return] extends Any {
    * @return a new task that returns `Unit` after the existing task completes
    */
   def unit: Task[Unit] = map(_ => ())
-
-  /**
-   * Converts the task to a `Pull`.
-   *
-   * @return a `Pull` representing the task
-   */
-  def toPull: Pull[Return] = Pull.suspend(Pull.pure(sync()))
 }
 
 object Task {
