@@ -1,9 +1,9 @@
 package rapid
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
-class VirtualThreadFiber[Return](val task: Task[Return]) extends BlockableFiber[Return] {
+class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
   private var result: Try[Return] = _
 
   private val thread = Thread.startVirtualThread(() => {
@@ -15,7 +15,7 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends BlockableFiber[
     result.get
   }
 
-  override def await(duration: Duration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
+  override def await(duration: FiniteDuration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
     Some(result.get)
   } else {
     None

@@ -1,10 +1,8 @@
 package rapid
 
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.atomic.AtomicLong
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.util.Try
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 
 trait Fiber[Return] extends Task[Return] {
   override def start(): Fiber[Return] = this
@@ -14,7 +12,7 @@ trait Fiber[Return] extends Task[Return] {
 
 object Fiber {
   def fromFuture[Return](future: Future[Return]): Fiber[Return] =
-    () => Await.result(future, Duration.Inf)
+    () => Await.result(future, 24.hours)
 
   def fromFuture[Return](future: CompletableFuture[Return]): Fiber[Return] = {
     val completable = Task.completable[Return]

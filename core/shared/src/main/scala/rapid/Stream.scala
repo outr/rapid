@@ -58,6 +58,31 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   })
 
   /**
+   * Chunks the stream's values into vectors of size `size` (except possibly the last).
+   *
+   * @param chunkSize the maximum size of each chunk
+   * @return a new stream where each element is a vector of `Return` values
+   */
+  def chunk(chunkSize: Int = 1024): Stream[Vector[Return]] = new Stream(task.map { i =>
+    new Iterator[Vector[Return]] {
+      override def hasNext: Boolean = i.hasNext
+
+      override def next(): Vector[Return] = {
+        if (!hasNext) throw new NoSuchElementException("no more chunks")
+
+        val buffer = new scala.collection.mutable.ArrayBuffer[Return](chunkSize)
+        var count = 0
+        while (count < size && i.hasNext) {
+          buffer += i.next()
+          count += 1
+        }
+
+        buffer.toVector
+      }
+    }
+  })
+
+  /**
    * Appends another stream to this stream.
    *
    * @param that the stream to append
@@ -69,6 +94,11 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
     val iterator2 = that.task.sync()
     iterator1 ++ iterator2
   })
+
+  /**
+   * Drains the stream and fully evaluates it.
+   */
+  def drain: Task[Unit] = count.unit
 
   /**
    * Converts the stream to a list.
@@ -161,6 +191,15 @@ object Stream {
    * @return a new stream that emits the values in the sequence
    */
   def emits[Return](seq: Seq[Return]): Stream[Return] = new Stream[Return](Task(seq.iterator))
+
+  /**
+   * Creates a stream from an iterator task.
+   *
+   * @param iterator the iterator task
+   * @tparam Return the type of the values
+   * @return a new stream that emits the values in the iterator
+   */
+  def fromIterator[Return](iterator: Task[Iterator[Return]]): Stream[Return] = new Stream[Return](iterator)
 
   /**
    * Creates a Byte stream from the NIO Path

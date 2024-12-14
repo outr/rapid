@@ -214,6 +214,11 @@ object Task {
   def sleep(duration: FiniteDuration): Task[Unit] = apply(Thread.sleep(duration.toMillis))
 
   /**
+   * Effect to get the current time in milliseconds
+   */
+  def now: Task[Long] = apply(System.currentTimeMillis())
+
+  /**
    * Defers the execution of the given task.
    *
    * @param task the task to defer
