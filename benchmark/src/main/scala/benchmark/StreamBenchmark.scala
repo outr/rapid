@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
 class StreamBenchmark {
-  @Param(Array("1000")) //, "10000", "100000"))
+  @Param(Array("1000", "10000", "100000"))
   var size: Int = _
 
   lazy val rapidStream: rapid.Stream[Int] = rapid.Stream.emits(1 to size)
@@ -31,48 +31,48 @@ class StreamBenchmark {
     list
   }
 
-//  @Benchmark
-//  def rapidStreamToList(): List[Int] = {
-//    verify(rapidStream.toList.sync())
-//  }
+  @Benchmark
+  def rapidStreamToList(): List[Int] = {
+    verify(rapidStream.toList.sync())
+  }
 
   @Benchmark
   def rapidParallelStreamToList(): List[Int] = {
     verify(rapidStream.par()(Task.pure).toList.sync())
   }
 
-//  @Benchmark
-//  def fs2StreamToList(): List[Int] = {
-//    verify(fs2Stream.compile.toList.unsafeRunSync())
-//  }
-//
-//  @Benchmark
-//  def rapidStreamFilter(): List[Int] = {
-//    verify(rapidStream.filter(_ % 2 == 0).toList.sync(), size / 2)
-//  }
+  @Benchmark
+  def fs2StreamToList(): List[Int] = {
+    verify(fs2Stream.compile.toList.unsafeRunSync())
+  }
+
+  @Benchmark
+  def rapidStreamFilter(): List[Int] = {
+    verify(rapidStream.filter(_ % 2 == 0).toList.sync(), size / 2)
+  }
 
   @Benchmark
   def rapidParallelStreamFilter(): List[Int] = {
     verify(rapidStream.filter(_ % 2 == 0).par()(Task.pure).toList.sync(), size / 2)
   }
 
-//  @Benchmark
-//  def fs2StreamFilter(): List[Int] = {
-//    verify(fs2Stream.filter(_ % 2 == 0).compile.toList.unsafeRunSync(), size / 2)
-//  }
-//
-//  @Benchmark
-//  def rapidStreamMap(): List[Int] = {
-//    verify(rapidStream.map(_ * 2).toList.sync())
-//  }
+  @Benchmark
+  def fs2StreamFilter(): List[Int] = {
+    verify(fs2Stream.filter(_ % 2 == 0).compile.toList.unsafeRunSync(), size / 2)
+  }
+
+  @Benchmark
+  def rapidStreamMap(): List[Int] = {
+    verify(rapidStream.map(_ * 2).toList.sync())
+  }
 
   @Benchmark
   def rapidParallelStreamMap(): List[Int] = {
     verify(rapidStream.par()(i => Task(i * 2)).toList.sync())
   }
 
-//  @Benchmark
-//  def fs2StreamMap(): List[Int] = {
-//    verify(fs2Stream.map(_ * 2).compile.toList.unsafeRunSync())
-//  }
+  @Benchmark
+  def fs2StreamMap(): List[Int] = {
+    verify(fs2Stream.map(_ * 2).compile.toList.unsafeRunSync())
+  }
 }

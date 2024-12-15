@@ -12,7 +12,7 @@ case class ParallelStream[T, R](stream: Stream[T],
                                 maxBuffer: Int) {
   def drain: Task[Unit] = Task.unit.flatMap { _ =>
     val completable = Task.completable[Unit]
-    ParallelStreamProcessor(
+    ParallelUnorderedStreamProcessor(
       stream = this,
       handle = (_: R) => (),
       complete = (_: Int) => completable.success(())
@@ -22,7 +22,7 @@ case class ParallelStream[T, R](stream: Stream[T],
 
   def count: Task[Int] = Task.unit.flatMap { _ =>
     val completable = Task.completable[Int]
-    ParallelStreamProcessor(
+    ParallelUnorderedStreamProcessor(
       stream = this,
       handle = (_: R) => (),
       complete = completable.success
@@ -33,7 +33,7 @@ case class ParallelStream[T, R](stream: Stream[T],
   def toList: Task[List[R]] = Task.unit.flatMap { _ =>
     val list = ListBuffer.empty[R]
     val completable = Task.completable[List[R]]
-    ParallelStreamProcessor(
+    ParallelUnorderedStreamProcessor(
       stream = this,
       handle = list.addOne,
       complete = (_: Int) => completable.success(list.toList)
