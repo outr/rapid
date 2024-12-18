@@ -115,12 +115,14 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def count: Task[Int] = task.map(_.size)
 
   def par[R](maxThreads: Int = ParallelStream.DefaultMaxThreads,
-             maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
+             maxBuffer: Int = ParallelStream.DefaultMaxBuffer,
+             ordered: Boolean = false)
             (f: Return => Task[R]): ParallelStream[Return, R] = ParallelStream(
     stream = this,
     f = f,
     maxThreads = maxThreads,
-    maxBuffer = maxBuffer
+    maxBuffer = maxBuffer,
+    ordered = ordered
   )
 }
 
