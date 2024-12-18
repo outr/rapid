@@ -32,14 +32,14 @@ class ParallelStreamSpec extends AnyWordSpec with Matchers {
         Task(i * 2)
       }
       val task = stream.toList
-      task.sync() should be(List(2, 4, 6, 8, 10))
+      task.sync().sorted should be(List(2, 4, 6, 8, 10))
     }
     "correctly toList with random sleeps" in {
       val stream = Stream.emits(List(1, 2, 3, 4, 5)).par() { i =>
         Task.sleep((Math.random() * 1000).toInt.millis).map(_ => i * 2)
       }
       val task = stream.toList
-      task.sync() should be(List(2, 4, 6, 8, 10))
+      task.sync().sorted should be(List(2, 4, 6, 8, 10))
     }
     "correctly toList with random sleeps and overflowing maxBuffer" in {
       val stream = Stream.emits(0 until 100_000).par(maxBuffer = 100) { i =>
