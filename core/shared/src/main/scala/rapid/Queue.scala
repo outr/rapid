@@ -11,7 +11,7 @@ case class Queue[T](maxSize: Int) {
 
   def isEmpty: Boolean = size == 0
 
-  def tryAdd(value: T): Boolean = {
+  def enqueue(value: T): Boolean = {
     var incremented = false
     s.updateAndGet((operand: Int) => {
       if (operand < maxSize) {
@@ -28,11 +28,7 @@ case class Queue[T](maxSize: Int) {
     incremented
   }
 
-  def add(value: T): Unit = while (!tryAdd(value)) {
-    Thread.`yield`()
-  }
-
-  def poll(): Opt[T] = {
+  def dequeue(): Opt[T] = {
     val o = Opt(q.poll())
     if (o.isNonEmpty) {
       s.decrementAndGet()

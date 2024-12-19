@@ -5,8 +5,7 @@ import scala.collection.mutable.ListBuffer
 case class ParallelStream[T, R](stream: Stream[T],
                                 f: T => Task[R],
                                 maxThreads: Int,
-                                maxBuffer: Int,
-                                ordered: Boolean) {
+                                maxBuffer: Int) {
   def drain: Task[Unit] = Task.unit.flatMap { _ =>
     val completable = Task.completable[Unit]
     compile(_ => (), _ => completable.success(()))
@@ -26,22 +25,11 @@ case class ParallelStream[T, R](stream: Stream[T],
     completable
   }
 
-  protected def compile(handle: R => Unit, complete: Int => Unit): Unit = if (ordered) {
-    ParallelStreamProcessor(
-      stream = this,
-      handle = handle,
-      complete = complete
-    )
-  } else {
-    ParallelUnorderedStreamProcessor(
-      stream = this,
-      handle = handle,
-      complete = complete
-    )
-  }
+  protected def compile(handle: R => Unit, complete: Int => Unit): Unit =
+    ParallelStreamProcessor(this, handle, complete)
 }
 
 object ParallelStream {
   val DefaultMaxThreads: Int = Runtime.getRuntime.availableProcessors * 2
-  val DefaultMaxBuffer: Int = 1_000
+  val DefaultMaxBuffer: Int = 100_000
 }

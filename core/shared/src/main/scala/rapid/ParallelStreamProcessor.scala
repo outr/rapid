@@ -1,6 +1,5 @@
 package rapid
 
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
 
@@ -9,60 +8,71 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
                                          complete: Int => Unit) {
   private val iteratorTask: Task[Iterator[T]] = Stream.task(stream.stream)
 
-  private val ready = new AtomicIndexedQueue[R](stream.maxBuffer)
-  private val processing = new ConcurrentLinkedQueue[(Int, Task[R])]
+  private val queue = new LockFreeQueue[(T, Int)](stream.maxBuffer)
+  private val ready = new LockFreeQueue[R](stream.maxBuffer)
   @volatile private var _total = -1
 
-  // Start a fiber that consumes the stream and queues tasks
-  private val queuingFiber: Fiber[Unit] = iteratorTask.map { iterator =>
-    var total = 0
-    iterator.zipWithIndex.foreach {
-      case (t, index) =>
-        processing.add(index -> stream.f(t))
-        total = index + 1
+  // Feed the iterator into the queue until empty
+  iteratorTask.map { iterator =>
+    var counter = 0
+    iterator.zipWithIndex.foreach { tuple =>
+      while (!queue.enqueue(tuple)) {
+        Thread.`yield`()
+      }
+      counter += 1
     }
-    _total = total
+    _total = counter
+  }.start()
+
+  // Process the queue and feed into ready
+  {
+    val counter = new AtomicInteger(0)
+
+    @tailrec
+    def recurse(): Unit = {
+      val next = queue.dequeue()
+      next.foreach {
+        case (t, index) =>
+          val r = stream.f(t).sync()
+          while (counter.get() != index) {
+            Thread.`yield`()
+          }
+          while (!ready.enqueue(r)) {
+            Thread.`yield`()
+          }
+          counter.incrementAndGet()
+      }
+      if (next.isEmpty && _total != -1) {
+        // Finished
+      } else {
+        recurse()
+      }
+    }
+
+    val tasks = (0 until stream.maxThreads).toList.map { _ =>
+      Task(recurse())
+    }
+    TaskSeqOps(tasks).tasks
   }.start()
 
   def total: Option[Int] = if (_total == -1) None else Some(_total)
 
-  // Spawn worker fibers to process tasks
-  (0 until stream.maxThreads).foreach { _ =>
-    Task(processRecursive()).start()
-  }
+  // Processes through the ready queue feeding to handle and finally complete
+  Task(handleNext(0)).start()
 
   @tailrec
-  private def processRecursive(): Unit = {
-    val next = processing.poll()
-    if (next != null) {
-      val (index, task) = next
-      val result = task.sync()
-      ready.add(index, result)
+  private def handleNext(counter: Int): Unit = {
+    val next = ready.dequeue()
+    if (_total == counter) {
+      complete(counter)
     } else {
-      // No next task
-      Thread.sleep(1) // Consider a better signaling mechanism
-    }
-    // If total known and no more tasks, stop recursion
-    if (_total != -1 && processing.isEmpty) {
-      // Done processing
-    } else {
-      processRecursive()
+      val c = next match {
+        case Opt.Value(value) =>
+          handle(value)
+          counter + 1
+        case Opt.Empty => counter
+      }
+      handleNext(c)
     }
   }
-
-  // Fiber to consume results from 'ready' and handle them
-  Task {
-    var count = 0
-    while (_total == -1 || count < _total) {
-      ready.blockingPoll() match {
-        case Some(r) =>
-          handle(r)
-          count += 1
-        case None =>
-          // No result ready yet
-          Thread.sleep(1) // Again, consider using proper synchronization
-      }
-    }
-    complete(_total)
-  }.start()
 }

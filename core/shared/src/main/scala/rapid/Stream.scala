@@ -115,57 +115,14 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def count: Task[Int] = task.map(_.size)
 
   def par[R](maxThreads: Int = ParallelStream.DefaultMaxThreads,
-             maxBuffer: Int = ParallelStream.DefaultMaxBuffer,
-             ordered: Boolean = false)
+             maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
             (f: Return => Task[R]): ParallelStream[Return, R] = ParallelStream(
     stream = this,
     f = f,
     maxThreads = maxThreads,
-    maxBuffer = maxBuffer,
-    ordered = ordered
+    maxBuffer = maxBuffer
   )
 }
-
-/*trait Stream[Return] { stream =>
-  /**
-   * Produces the next value in the stream, if any.
-   *
-   * @return a `Pull` that produces an optional pair of the next value and the remaining stream
-   */
-  def pull: Pull[Option[(Return, Stream[Return])]]
-
-  /**
-   * Transforms the values in the stream using the given function that returns a task, with a maximum concurrency.
-   *
-   * @param maxConcurrency the maximum number of concurrent tasks
-   * @param f the function to transform the values into tasks
-   * @tparam T the type of the values in the tasks
-   * @return a new stream with the transformed values
-   */
-  def parEvalMap[T](maxConcurrency: Int)(f: Return => Task[T]): Stream[T] = new Stream[T] {
-    val semaphore = new Semaphore(maxConcurrency)
-
-    def pull: Pull[Option[(T, Stream[T])]] = Pull.suspend {
-      if (semaphore.tryAcquire()) {
-        stream.pull.flatMap {
-          case Some((head, tail)) =>
-            val task = f(head)
-            Pull.suspend {
-              task.map { result =>
-                semaphore.release()
-                Option(result -> tail.parEvalMap(maxConcurrency)(f))
-              }.toPull
-            }
-          case None =>
-            semaphore.release()
-            Pull.pure(None)
-        }
-      } else {
-        Pull.suspend(pull)
-      }
-    }
-  }
-}*/
 
 object Stream {
   /**
