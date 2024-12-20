@@ -17,7 +17,7 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "0.3.1"
+ThisBuild / version := "0.3.2-SNAPSHOT"
 ThisBuild / scalaVersion := scala213
 ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
@@ -54,7 +54,7 @@ val scalaJsMacrotaskVersion: String = "1.1.1"
 val scalaTestVersion: String = "3.2.19"
 
 lazy val root = project.in(file("."))
-  .aggregate(core.jvm, core.js, core.native, cats.jvm, cats.js)
+  .aggregate(core.jvm, core.js, core.native, test.jvm, test.js, test.native, cats.jvm, cats.js)
   .settings(
     name := projectName,
     publish := {},
@@ -72,6 +72,16 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .jsSettings(
     libraryDependencies ++= Seq(
       "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion,
+    )
+  )
+
+lazy val test = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Full)
+  .dependsOn(core)
+  .settings(
+    name := s"$projectName-test",
+    libraryDependencies ++= Seq(
+      "org.scalatest" %%% "scalatest" % scalaTestVersion
     )
   )
 

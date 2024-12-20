@@ -129,6 +129,12 @@ trait Task[Return] extends Any {
    * @return a new task that returns `Unit` after the existing task completes
    */
   def unit: Task[Unit] = map(_ => ())
+
+  /**
+   * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
+   */
+  def toFuture(implicit ec: scala.concurrent.ExecutionContext): scala.concurrent.Future[Return] =
+    scala.concurrent.Future(this.sync())
 }
 
 object Task {
