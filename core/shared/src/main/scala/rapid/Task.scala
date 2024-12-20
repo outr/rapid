@@ -45,7 +45,7 @@ trait Task[Return] extends Any {
    *
    * @return either the result of the task or an exception
    */
-  def attempt(): Task[Try[Return]] = Task {
+  def attempt: Task[Try[Return]] = Task {
     Try(invoke())
   }
 
@@ -55,7 +55,7 @@ trait Task[Return] extends Any {
    * @param f handler
    * @return Task[Return]
    */
-  def handleError(f: Throwable => Task[Return]): Task[Return] = attempt()
+  def handleError(f: Throwable => Task[Return]): Task[Return] = attempt
     .flatMap {
       case Success(r) => Task.pure(r)
       case Failure(t) => f(t)
@@ -66,7 +66,7 @@ trait Task[Return] extends Any {
    *
    * @param task the task to guarantee invocation of
    */
-  def guarantee(task: Task[Unit]): Task[Return] = attempt()
+  def guarantee(task: Task[Unit]): Task[Return] = attempt
     .flatTap { _ =>
       task
     }
@@ -99,7 +99,7 @@ trait Task[Return] extends Any {
    * @param f the function to handle the result
    * @return existing signature
    */
-  def flatTap(f: Return => Task[Unit]): Task[Return] = flatMap { r =>
+  def flatTap(f: Return => Task[_]): Task[Return] = flatMap { r =>
     f(r).map(_ => r)
   }
 
@@ -146,6 +146,12 @@ object Task {
     override def flatMap[T](f: Return => Task[T]): Task[T] = copy(f.asInstanceOf[Any => Task[Any]] :: list)
   }
 
+  case class Error[Return](throwable: Throwable) extends AnyVal with Task[Return] {
+    override protected def invoke(): Return = throw throwable
+
+    override def flatMap[T](f: Return => Task[T]): Task[T] = this.asInstanceOf[Task[T]]
+  }
+
   class Completable[Return] extends Task[Return] {
     @volatile private var result: Option[Try[Return]] = None
 
@@ -189,6 +195,14 @@ object Task {
    * @return a new task
    */
   def apply[Return](f: => Return): Task[Return] = Single(() => f)
+
+  /**
+   * Creates a new task that raises an error when invoked.
+   *
+   * @param throwable the exception to raise
+   * @return a new Error task
+   */
+  def error[Return](throwable: Throwable): Task[Return] = Error[Return](throwable)
 
   /**
    * Creates a new Completable task.

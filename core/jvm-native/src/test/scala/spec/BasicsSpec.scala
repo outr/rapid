@@ -47,6 +47,14 @@ class BasicsSpec extends AnyWordSpec with Matchers {
         .sync()
       result should be("Recovered")
     }
+    "raise an error and recover" in {
+      val result = Task.error(new RuntimeException("Die Die Die"))
+        .handleError { _ =>
+          Task.pure("Recovered")
+        }
+        .sync()
+      result should be("Recovered")
+    }
     "process a list of tasks to a task with a list" in {
       val list = List(
         Task("One"), Task("Two"), Task("Three")

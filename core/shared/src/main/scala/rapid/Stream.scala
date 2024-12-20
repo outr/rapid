@@ -22,9 +22,15 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * Takes values from the stream while the given predicate holds.
    *
    * @param p the predicate to test the values
-   * @return a new stream with the values that satisfy the predicate
    */
   def takeWhile(p: Return => Boolean): Stream[Return] = new Stream(task.map(_.takeWhile(p)))
+
+  /**
+   * Takes n values from the stream and disregards the rest.
+   *
+   * @param n the number of values to take from the stream
+   */
+  def take(n: Int): Stream[Return] = new Stream(task.map(_.take(n)))
 
   /**
    * Transforms the values in the stream using the given function.
@@ -101,6 +107,32 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def drain: Task[Unit] = count.unit
 
   /**
+   * Cycles through all results but only returns the last element. Will error if the Stream is empty.
+   */
+  def last: Task[Return] = task.map(_.reduce((_, b) => b))
+
+  /**
+   * Cycles through all results but only returns the last element or None if the stream is empty.
+   */
+  def lastOption: Task[Option[Return]] = task.map { iterator =>
+    if (iterator.hasNext) {
+      Some(iterator.reduce((_, b) => b))
+    } else {
+      None
+    }
+  }
+
+  /**
+   * Grabs only the first result from the stream.
+   */
+  def first: Task[Return] = take(1).last
+
+  /**
+   * Grabs only the first element or None if the stream is empty.
+   */
+  def firstOption: Task[Option[Return]] = take(1).lastOption
+
+  /**
    * Converts the stream to a list.
    *
    * @return a task that produces a list of the values in the stream
@@ -159,6 +191,11 @@ object Stream {
    * @return a new stream that emits the values in the iterator
    */
   def fromIterator[Return](iterator: Task[Iterator[Return]]): Stream[Return] = new Stream[Return](iterator)
+
+  /**
+   * Forces a Task[Stream] into Stream
+   */
+  def force[Return](stream: Task[Stream[Return]]): Stream[Return] = new Stream[Return](stream.flatMap(_.task))
 
   /**
    * Creates a Byte stream from the NIO Path
