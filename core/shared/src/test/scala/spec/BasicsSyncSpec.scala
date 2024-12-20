@@ -5,6 +5,8 @@ import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
 
+import scala.concurrent.CancellationException
+
 class BasicsSyncSpec extends AnyWordSpec with Matchers {
   "Basics sync" should {
     "handle a simple task" in {
@@ -43,5 +45,15 @@ class BasicsSyncSpec extends AnyWordSpec with Matchers {
       )
       list.tasks.sync() should be(List("One", "Two", "Three"))
     }
+    // TODO: Re-enable once this can work with JS
+    /*"cancel a running task" in {
+      if (Platform.supportsCancel) {
+        val start = System.currentTimeMillis()
+        val fiber = Task.sleep(1.hour).map(_ => "Never").start()
+        fiber.cancel().sync()
+        a[CancellationException] should be thrownBy fiber.sync()
+        (System.currentTimeMillis() - start) should be < 1000L
+      }
+    }*/
   }
 }
