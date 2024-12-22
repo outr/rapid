@@ -122,11 +122,7 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * Cycles through all results but only returns the last element or None if the stream is empty.
    */
   def lastOption: Task[Option[Return]] = task.map { iterator =>
-    if (iterator.hasNext) {
-      Some(iterator.reduce((_, b) => b))
-    } else {
-      None
-    }
+    iterator.reduceOption((_, b) => b)
   }
 
   /**

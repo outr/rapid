@@ -10,7 +10,11 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
 
   private val thread = Thread.startVirtualThread(() => {
     if (!cancelled) {
-      result = Try(task.sync())
+      try {
+        result = task.attempt.sync()
+      } catch {
+        case t: Throwable => result = Failure(t)
+      }
     }
   })
 
