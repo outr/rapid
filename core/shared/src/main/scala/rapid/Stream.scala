@@ -42,6 +42,13 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def map[T](f: Return => T): Stream[T] = new Stream(task.map(_.map(f)))
 
   /**
+   * Transforms the values in the stream to include the index of the value within the stream
+   */
+  def zipWithIndex: Stream[(Return, Int)] = new Stream(task.map { iterator =>
+    iterator.zipWithIndex
+  })
+
+  /**
    * Transforms the values in the stream using the given function that returns a new stream.
    *
    * @param f the function to transform the values into new streams
@@ -120,6 +127,18 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
     } else {
       None
     }
+  }
+
+  /**
+   * Folds through the stream returning the last value
+   *
+   * @param initial the initial T to start with
+   * @param f the processing function
+   * @tparam T the resulting type
+   * @return Task[T]
+   */
+  def fold[T](initial: T)(f: (T, Return) => Task[T]): Task[T] = task.map { iterator =>
+    iterator.foldLeft(initial)((t, r) => f(t, r).sync())
   }
 
   /**
