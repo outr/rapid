@@ -267,7 +267,7 @@ object Task {
                                 asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = Task.unit
     .flatMap { _ =>
       val completable = Task.completable[C[Return]]
-      val total = tasks.size
+      val total = asIterable(tasks).size
       val array = new Array[Return](total)
       val completed = new AtomicInteger(0)
 
@@ -279,7 +279,7 @@ object Task {
         }
       }
 
-      tasks.zipWithIndex.foreach {
+      asIterable(tasks).zipWithIndex.foreach {
         case (task, index) => task.map { r =>
           array(index) = r
           add(r, index)
