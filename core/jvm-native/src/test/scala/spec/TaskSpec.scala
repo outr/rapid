@@ -2,7 +2,7 @@ package spec
 
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import rapid.Task
+import rapid._
 
 import scala.concurrent.duration._
 
