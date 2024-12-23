@@ -53,5 +53,13 @@ class TaskSpec extends AnyWordSpec with Matchers {
       } yield one + two + three
       result.sync() should be(6)
     }
+    "process a list of tasks to a task with a list in parallel" in {
+      val list = List(
+        Task("One"), Task("Two"), Task("Three")
+      )
+      list.tasksPar.map { list =>
+        list should be(List("One", "Two", "Three"))
+      }
+    }
   }
 }

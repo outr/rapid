@@ -1,7 +1,9 @@
 package rapid
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.BuildFrom
 import scala.concurrent.duration.FiniteDuration
+import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
 
 /**
@@ -254,4 +256,35 @@ object Task {
       }.result()
     }
   }
+
+  /**
+   * Converts a sequence of Task[Return] to a Task that returns a sequence of Return in parallel. Similar to sequence,
+   * but starts a new Task per entry in the sequence. Warning: For large sequences this can be extremely heavy on the
+   * CPU. For larger sequences it's recommended to use Stream.par instead.
+   */
+  def parSequence[Return: ClassTag, C[_]](tasks: C[Task[Return]])
+                                         (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
+                                asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = Task.unit
+    .flatMap { _ =>
+      val completable = Task.completable[C[Return]]
+      val total = tasks.size
+      val array = new Array[Return](total)
+      val completed = new AtomicInteger(0)
+
+      def add(r: Return, index: Int): Unit = {
+        array(index) = r
+        val finished = completed.incrementAndGet()
+        if (finished == total) {
+          completable.success(bf.newBuilder(tasks).addAll(array).result())
+        }
+      }
+
+      tasks.zipWithIndex.foreach {
+        case (task, index) => task.map { r =>
+          array(index) = r
+          add(r, index)
+        }.start()
+      }
+      completable
+    }
 }
