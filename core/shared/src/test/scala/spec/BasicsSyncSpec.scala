@@ -61,6 +61,14 @@ class BasicsSyncSpec extends AnyWordSpec with Matchers {
       forge(1).sync() should be("One")
       forge(5).sync() should be("Five")
     }
+    "flatten a task within a task" in {
+      val task = Task {
+        Task {
+          "Success!"
+        }
+      }
+      task.flatten.sync() should be("Success!")
+    }
     // TODO: Re-enable once this can work with JS
     /*"cancel a running task" in {
       if (Platform.supportsCancel) {
