@@ -1,5 +1,7 @@
 package rapid
 
+import rapid.ops.TaskSeqOps
+
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
 

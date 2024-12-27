@@ -57,5 +57,10 @@ class StreamSpec extends AnyWordSpec with Matchers {
       val result = stream.toList.sync()
       result shouldEqual List(1, 2, 3, 4, 5)
     }
+    "filter out None from list" in {
+      val stream = Stream(Some(1), None, Some(2), None, Some(3))
+      val result = stream.unNone.toList.sync()
+      result should be(List(1, 2, 3))
+    }
   }
 }

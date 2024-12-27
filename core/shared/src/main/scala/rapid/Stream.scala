@@ -19,6 +19,16 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def filter(p: Return => Boolean): Stream[Return] = new Stream(task.map(_.filter(p)))
 
   /**
+   * Builds a new stream by applying a partial function to all elements of this stream on which the function is defined.
+   *
+   * @param f the partial function to apply
+   * @tparam T the new return type
+   */
+  def collect[T](f: PartialFunction[Return, T]): Stream[T] = new Stream(task.map { iterator =>
+    iterator.collect(f)
+  })
+
+  /**
    * Takes values from the stream while the given predicate holds.
    *
    * @param p the predicate to test the values
@@ -172,6 +182,13 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
 }
 
 object Stream {
+  /**
+   * Creates a stream with a variable number of entries
+   *
+   * @param values the variable number of entries
+   */
+  def apply[Return](values: Return*): Stream[Return] = emits(values)
+
   /**
    * Creates a stream that emits a single value.
    *

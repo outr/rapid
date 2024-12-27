@@ -1,4 +1,6 @@
-package rapid
+package rapid.ops
+
+import rapid.Task
 
 import scala.collection.BuildFrom
 import scala.reflect.ClassTag
