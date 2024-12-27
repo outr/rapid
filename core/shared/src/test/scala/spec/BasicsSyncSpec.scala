@@ -45,6 +45,22 @@ class BasicsSyncSpec extends AnyWordSpec with Matchers {
       )
       list.tasks.sync() should be(List("One", "Two", "Three"))
     }
+    "process a Forge with multiple values" in {
+      val forge = Forge[Int, String] { i =>
+        Task {
+          i match {
+            case 0 => "Zero"
+            case 1 => "One"
+            case 2 => "Two"
+            case 3 => "Three"
+            case 4 => "Four"
+            case 5 => "Five"
+          }
+        }
+      }
+      forge(1).sync() should be("One")
+      forge(5).sync() should be("Five")
+    }
     // TODO: Re-enable once this can work with JS
     /*"cancel a running task" in {
       if (Platform.supportsCancel) {
