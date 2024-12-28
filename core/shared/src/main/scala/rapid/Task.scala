@@ -84,6 +84,17 @@ trait Task[Return] extends Any {
   def map[T](f: Return => T): Task[T] = Task(f(invoke()))
 
   /**
+   * Similar to map, but does not change the value.
+   *
+   * @param f the function to apply to underlying value
+   * @return Task[Return]
+   */
+  def foreach(f: Return => Unit): Task[Return] = map { r =>
+    f(r)
+    r
+  }
+
+  /**
    * Flat maps the result of the task using the given function.
    *
    * @param f the function to transform the result into a new task
@@ -131,6 +142,17 @@ trait Task[Return] extends Any {
    * @return a new task that returns `Unit` after the existing task completes
    */
   def unit: Task[Unit] = map(_ => ())
+
+  /**
+   * Combines the two tasks to execute at the same time
+   *
+   * @param that the second task to execute
+   */
+  def and[T](that: Task[T]): Task[(Return, T)] = {
+    val f1 = this.start()
+    val f2 = that.start()
+    f1.flatMap(r => f2.map(t => r -> t))
+  }
 
   /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.

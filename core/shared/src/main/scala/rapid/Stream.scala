@@ -52,6 +52,17 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def map[T](f: Return => T): Stream[T] = new Stream(task.map(_.map(f)))
 
   /**
+   * Similar to map, but doesn't change the result. Allows doing something with each value without changing the result.
+   *
+   * @param f the function to handle each value
+   * @return Stream[Return]
+   */
+  def foreach(f: Return => Unit): Stream[Return] = map { r =>
+    f(r)
+    r
+  }
+
+  /**
    * Transforms the values in the stream to include the index of the value within the stream
    */
   def zipWithIndex: Stream[(Return, Int)] = new Stream(task.map { iterator =>
@@ -79,6 +90,17 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def evalMap[T](f: Return => Task[T]): Stream[T] = new Stream(task.map { iterator =>
     iterator.map(f).map(_.sync())
   })
+
+  /**
+   * Similar to evalMap, but doesn't change the result. Allows doing something with each value without changing the
+   * result.
+   *
+   * @param f the function to handle each value
+   * @return Stream[Return]
+   */
+  def evalForeach(f: Return => Task[Unit]): Stream[Return] = evalMap { r =>
+    f(r).map(_ => r)
+  }
 
   /**
    * Chunks the stream's values into vectors of size `size` (except possibly the last).
