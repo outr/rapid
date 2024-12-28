@@ -5,6 +5,8 @@ import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
 
+import java.util.concurrent.atomic.AtomicInteger
+
 class BasicsSpec extends AnyWordSpec with Matchers {
   "Basics" should {
     "handle a simple task" in {
@@ -60,6 +62,43 @@ class BasicsSpec extends AnyWordSpec with Matchers {
         Task("One"), Task("Two"), Task("Three")
       )
       list.tasks.sync() should be(List("One", "Two", "Three"))
+    }
+    "verify a singleton task works properly sequentially" in {
+      val counter = new AtomicInteger(0)
+      val task = Task {
+        counter.incrementAndGet()
+      }.singleton
+      val verify = for {
+        one <- task
+        two <- task
+        three <- task
+      } yield {
+        one should be(1)
+        two should be(1)
+        three should be(1)
+      }
+      verify.sync()
+    }
+    "verify a singleton task works properly concurrently" in {
+      val counter = new AtomicInteger(0)
+      val task = Task.sleep(1.second).map { _ =>
+        counter.incrementAndGet()
+      }.singleton
+      val verify = for {
+        _ <- Task.unit
+        f1 = task.start()
+        f2 = task.start()
+        f3 = task.start()
+        _ = counter.get() should be(0)
+        one <- f1
+        two <- f2
+        three <- f3
+      } yield {
+        one should be(1)
+        two should be(1)
+        three should be(1)
+      }
+      verify.sync()
     }
   }
 }

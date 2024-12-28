@@ -128,6 +128,16 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   })
 
   /**
+   * Creates a grouping Stream expecting the group delineation is the natural sort order of the results.
+   *
+   * @param grouper the grouping function
+   * @tparam G the group key
+   */
+  def groupSequential[G](grouper: Return => G): Stream[Grouped[G, Return]] = new Stream(task.map { iterator =>
+    GroupedIterator(iterator, grouper)
+  })
+
+  /**
    * Appends another stream to this stream.
    *
    * @param that the stream to append

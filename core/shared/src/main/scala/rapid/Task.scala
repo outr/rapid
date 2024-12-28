@@ -1,6 +1,6 @@
 package rapid
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.BuildFrom
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
@@ -152,6 +152,26 @@ trait Task[Return] extends Any {
     val f1 = this.start()
     val f2 = that.start()
     f1.flatMap(r => f2.map(t => r -> t))
+  }
+
+  /**
+   * Makes this Task execute exactly once. Any future calls to this Task will return the result of the first execution.
+   */
+  def singleton: Task[Return] = {
+    val triggered = new AtomicBoolean(false)
+    val completable = Task.completable[Return]
+    val actualTask = map { r =>
+      completable.success(r)
+    }
+
+    Task {
+      val active = triggered.compareAndSet(false, true)
+      if (active) {
+        actualTask.start().flatMap(_ => completable)
+      } else {
+        completable
+      }
+    }.flatten
   }
 
   /**
