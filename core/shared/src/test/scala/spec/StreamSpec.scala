@@ -2,7 +2,7 @@ package spec
 
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
-import rapid.{Stream, Task}
+import rapid._
 
 class StreamSpec extends AnyWordSpec with Matchers {
   "Stream" should {
