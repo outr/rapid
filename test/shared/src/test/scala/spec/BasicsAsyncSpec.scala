@@ -1,10 +1,8 @@
 package spec
 
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
+import org.scalatest.wordspec.AsyncWordSpec
 import rapid._
-
-import scala.concurrent.duration.DurationInt
 
 class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
   "Basics sync" should {
@@ -57,5 +55,16 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
         s.length should be(32)
       }
     }
+    /*"flatMap millions of times without overflowing" in {
+      val max = 10_000_000
+      def count(i: Int): Task[Int] = if (i >= max) {
+        Task.pure(i)
+      } else {
+        Task(i + 1).flatMap(count)
+      }
+      count(0).map { result =>
+        result should be(max)
+      }
+    }*/
   }
 }

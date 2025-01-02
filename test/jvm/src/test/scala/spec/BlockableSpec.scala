@@ -10,7 +10,7 @@ import scala.concurrent.duration.DurationInt
 class BlockableSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
   "Blockable" should {
     "handle a completable partway through a chain" in {
-      Task.sleep(250.millis).completable[String].flatMap { c =>
+      Task.sleep(250.millis).withCompletable[String].flatMap { c =>
         Task.sleep(100.millis).foreach(_ => c.success("Finished!")).start()
         c
       }.map(_ should be("Finished!"))

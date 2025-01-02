@@ -7,20 +7,20 @@ case class ParallelStream[T, R](stream: Stream[T],
                                 maxThreads: Int,
                                 maxBuffer: Int) {
   def drain: Task[Unit] = Task.flatMap { _ =>
-    val completable = new Task.Completable[Unit]
+    val completable = Task.completable[Unit]
     compile(_ => (), _ => completable.success(()))
     completable
   }
 
   def count: Task[Int] = Task.flatMap { _ =>
-    val completable = new Task.Completable[Int]
+    val completable = Task.completable[Int]
     compile(_ => (), completable.success)
     completable
   }
 
   def toList: Task[List[R]] = Task.flatMap { _ =>
     val list = ListBuffer.empty[R]
-    val completable = new Task.Completable[List[R]]
+    val completable = Task.completable[List[R]]
     compile(list.addOne, _ => completable.success(list.toList))
     completable
   }

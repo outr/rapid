@@ -5,6 +5,8 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
 trait Fiber[Return] extends Task[Return] {
+  Task.Monitor.foreach(_.fiberCreated(this))
+
   override def start(): Fiber[Return] = this
 
   /**
@@ -12,7 +14,9 @@ trait Fiber[Return] extends Task[Return] {
    */
   def cancel(): Task[Boolean] = Task.pure(false)
 
-  override def await(): Return = invoke()
+  override def await(): Return = invokeInternal()
+
+  override def toString: String = "Fiber"
 }
 
 object Fiber {
@@ -20,7 +24,7 @@ object Fiber {
     () => Await.result(future, 24.hours)
 
   def fromFuture[Return](future: CompletableFuture[Return]): Fiber[Return] = {
-    val completable = new Task.Completable[Return]
+    val completable = Task.completable[Return]
     future.whenComplete {
       case (_, error) if error != null => completable.failure(error)
       case (r, _) => completable.success(r)
