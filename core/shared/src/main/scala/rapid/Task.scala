@@ -122,8 +122,8 @@ trait Task[Return] extends Any {
    * @param duration the duration to sleep
    * @return a new task that sleeps for the given duration after the existing task completes
    */
-  def sleep(duration: FiniteDuration): Task[Return] = flatMap { r =>
-    Task.sleep(duration).map(_ => r)
+  def sleep(duration: FiniteDuration): Task[Return] = flatTap { r =>
+    Task(Thread.sleep(duration.toMillis))
   }
 
   /**
@@ -181,7 +181,9 @@ trait Task[Return] extends Any {
     scala.concurrent.Future(this.sync())
 }
 
-object Task {
+object Task extends Task[Unit] {
+  override protected def invoke(): Unit = ()
+
   case class Pure[Return](value: Return) extends AnyVal with Task[Return] {
     override protected def invoke(): Return = value
   }
@@ -226,7 +228,7 @@ object Task {
   /**
    * A task that returns `Unit`.
    */
-  lazy val unit: Task[Unit] = pure(())
+  override def unit: Task[Unit] = this
 
   /**
    * Creates a new task with the given value pre-evaluated.
@@ -261,14 +263,6 @@ object Task {
    * @return a new Completable task
    */
   def completable[Return]: Completable[Return] = new Completable
-
-  /**
-   * Creates a new task that sleeps for the given duration.
-   *
-   * @param duration the duration to sleep
-   * @return a new task that sleeps for the given duration
-   */
-  def sleep(duration: FiniteDuration): Task[Unit] = apply(Thread.sleep(duration.toMillis))
 
   /**
    * Effect to get the current time in milliseconds
