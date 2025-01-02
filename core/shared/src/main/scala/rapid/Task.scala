@@ -210,9 +210,9 @@ trait Task[Return] extends Any {
    * Converts a sequence of Task[Return] to a Task that returns a sequence of Return. Generally cleaner usage via the
    * implicit in rapid on seq.tasks.
    */
-  def sequence[Return, C[_]](tasks: C[Task[Return]])
-                            (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
-                             asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = flatMap { _ =>
+  def sequence[T, C[_]](tasks: C[Task[T]])
+                       (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
+                        asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
     val empty = bf.newBuilder(tasks)
     Task {
       asIterable(tasks).foldLeft(empty) {
@@ -222,34 +222,34 @@ trait Task[Return] extends Any {
   }
 
   /**
-   * Converts a sequence of Task[Return] to a Task that returns a sequence of Return in parallel. Similar to sequence,
+   * Converts a sequence of Task[Return] to a Task that returns a sequence of T in parallel. Similar to sequence,
    * but starts a new Task per entry in the sequence. Warning: For large sequences this can be extremely heavy on the
    * CPU. For larger sequences it's recommended to use Stream.par instead.
    */
-  def parSequence[Return: ClassTag, C[_]](tasks: C[Task[Return]])
-                                         (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
-                                          asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = flatMap { _ =>
-      val completable = Task.completable[C[Return]]
-      val total = asIterable(tasks).size
-      val array = new Array[Return](total)
-      val completed = new AtomicInteger(0)
+  def parSequence[T: ClassTag, C[_]](tasks: C[Task[T]])
+                                    (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
+                                     asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
+    val completable = Task.completable[C[T]]
+    val total = asIterable(tasks).size
+    val array = new Array[T](total)
+    val completed = new AtomicInteger(0)
 
-      def add(r: Return, index: Int): Unit = {
-        array(index) = r
-        val finished = completed.incrementAndGet()
-        if (finished == total) {
-          completable.success(bf.newBuilder(tasks).addAll(array).result())
-        }
+    def add(r: T, index: Int): Unit = {
+      array(index) = r
+      val finished = completed.incrementAndGet()
+      if (finished == total) {
+        completable.success(bf.newBuilder(tasks).addAll(array).result())
       }
-
-      asIterable(tasks).zipWithIndex.foreach {
-        case (task, index) => task.map { r =>
-          array(index) = r
-          add(r, index)
-        }.start()
-      }
-      completable
     }
+
+    asIterable(tasks).zipWithIndex.foreach {
+      case (task, index) => task.map { r =>
+        array(index) = r
+        add(r, index)
+      }.start()
+    }
+    completable
+  }
 
   /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
