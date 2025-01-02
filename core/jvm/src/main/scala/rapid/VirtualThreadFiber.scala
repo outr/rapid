@@ -13,6 +13,7 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
       try {
         result = task.attempt.sync()
       } catch {
+        case _: InterruptedException if cancelled => result = Failure(new CancellationException("Task was cancelled"))
         case t: Throwable => result = Failure(t)
       }
     }

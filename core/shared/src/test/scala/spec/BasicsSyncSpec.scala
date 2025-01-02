@@ -69,15 +69,5 @@ class BasicsSyncSpec extends AnyWordSpec with Matchers {
       }
       task.flatten.sync() should be("Success!")
     }
-    // TODO: Re-enable once this can work with JS
-    /*"cancel a running task" in {
-      if (Platform.supportsCancel) {
-        val start = System.currentTimeMillis()
-        val fiber = Task.sleep(1.hour).map(_ => "Never").start()
-        fiber.cancel().sync()
-        a[CancellationException] should be thrownBy fiber.sync()
-        (System.currentTimeMillis() - start) should be < 1000L
-      }
-    }*/
   }
 }

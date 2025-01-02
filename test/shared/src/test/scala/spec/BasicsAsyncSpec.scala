@@ -52,5 +52,10 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
         list should be(List("One", "Two", "Three"))
       }
     }
+    "create a Unique value" in {
+      Unique(length = 32).map { s =>
+        s.length should be(32)
+      }
+    }
   }
 }
