@@ -34,7 +34,7 @@ class TaskSpec extends AnyWordSpec with Matchers {
     }
     "utilize completable" in {
       val start = System.currentTimeMillis()
-      val c = Task.completable[String]
+      val c = Task.completable[String].sync()
       Task.sleep(500.millis).map { _ =>
         c.success("Success!")
       }.start()

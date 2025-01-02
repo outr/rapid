@@ -52,6 +52,14 @@ trait Task[Return] extends Any {
   }
 
   /**
+   * Creates a new task that raises an error when invoked.
+   *
+   * @param throwable the exception to raise
+   * @return a new Error task
+   */
+  def error[T](throwable: Throwable): Task[T] = flatMap(_ => Task.Error[T](throwable))
+
+  /**
    * Handles error in task execution.
    *
    * @param f handler
@@ -191,7 +199,7 @@ trait Task[Return] extends Any {
    */
   def singleton: Task[Return] = {
     val triggered = new AtomicBoolean(false)
-    val completable = Task.completable[Return]
+    val completable = Task.completable[Return].sync()
     val actualTask = map { r =>
       completable.success(r)
     }
@@ -229,7 +237,7 @@ trait Task[Return] extends Any {
   def parSequence[T: ClassTag, C[_]](tasks: C[Task[T]])
                                     (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
                                      asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
-    val completable = Task.completable[C[T]]
+    val completable = Task.completable[C[T]].sync()
     val total = asIterable(tasks).size
     val array = new Array[T](total)
     val completed = new AtomicInteger(0)
@@ -250,6 +258,14 @@ trait Task[Return] extends Any {
     }
     completable
   }
+
+  /**
+   * Creates a new Completable task.
+   *
+   * @tparam T the type of the result produced by the task
+   * @return a new Completable task
+   */
+  def completable[T]: Task[Task.Completable[T]] = map(_ => new Task.Completable)
 
   /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
@@ -306,20 +322,4 @@ object Task extends Task[Unit] {
    * A task that returns `Unit`.
    */
   override def unit: Task[Unit] = this
-
-  /**
-   * Creates a new task that raises an error when invoked.
-   *
-   * @param throwable the exception to raise
-   * @return a new Error task
-   */
-  def error[Return](throwable: Throwable): Task[Return] = Error[Return](throwable)
-
-  /**
-   * Creates a new Completable task.
-   *
-   * @tparam Return the type of the result produced by the task
-   * @return a new Completable task
-   */
-  def completable[Return]: Completable[Return] = new Completable
 }

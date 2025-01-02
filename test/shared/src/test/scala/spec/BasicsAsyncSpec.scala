@@ -4,6 +4,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
 import rapid._
 
+import scala.concurrent.duration.DurationInt
+
 class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
   "Basics sync" should {
     "handle a simple task" in {

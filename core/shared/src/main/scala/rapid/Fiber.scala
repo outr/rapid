@@ -20,7 +20,7 @@ object Fiber {
     () => Await.result(future, 24.hours)
 
   def fromFuture[Return](future: CompletableFuture[Return]): Fiber[Return] = {
-    val completable = Task.completable[Return]
+    val completable = new Task.Completable[Return]
     future.whenComplete {
       case (_, error) if error != null => completable.failure(error)
       case (r, _) => completable.success(r)
