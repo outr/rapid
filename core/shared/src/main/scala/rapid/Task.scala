@@ -84,6 +84,24 @@ trait Task[Return] extends Any {
   def map[T](f: Return => T): Task[T] = Task(f(invoke()))
 
   /**
+   * Transforms this task to a pure result.
+   *
+   * @param value the return value of this Task
+   * @tparam T the type of the result produced by the task
+   * @return a new task
+   */
+  def pure[T](value: T): Task[T] = flatMap(_ => Task.Pure(value))
+
+  /**
+   * Transforms the result of this task to the result of the supplied function.
+   *
+   * @param f the function to execute
+   * @tparam T the type of the result produced by the task
+   * @return a new task
+   */
+  def apply[T](f: => T): Task[T] = Task.Single(() => f)
+
+  /**
    * Similar to map, but does not change the value.
    *
    * @param f the function to apply to underlying value
@@ -125,6 +143,20 @@ trait Task[Return] extends Any {
   def sleep(duration: FiniteDuration): Task[Return] = flatTap { r =>
     Task(Thread.sleep(duration.toMillis))
   }
+
+  /**
+   * Effect to get the current time in milliseconds
+   */
+  def now: Task[Long] = flatMap(_ => Task(System.currentTimeMillis()))
+
+  /**
+   * Defers the execution of the given task.
+   *
+   * @param task the task to defer
+   * @tparam T the type of the result produced by the task
+   * @return a new task that defers the execution of the given task
+   */
+  def defer[T](task: => Task[T]): Task[T] = flatMap(_ => task)
 
   /**
    * Convenience conditional execution of the Task. If the condition is true, the task will execute the instruction set,
@@ -173,6 +205,51 @@ trait Task[Return] extends Any {
       }
     }.flatten
   }
+
+  /**
+   * Converts a sequence of Task[Return] to a Task that returns a sequence of Return. Generally cleaner usage via the
+   * implicit in rapid on seq.tasks.
+   */
+  def sequence[Return, C[_]](tasks: C[Task[Return]])
+                            (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
+                             asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = flatMap { _ =>
+    val empty = bf.newBuilder(tasks)
+    Task {
+      asIterable(tasks).foldLeft(empty) {
+        case (builder, task) => builder.addOne(task.sync())
+      }.result()
+    }
+  }
+
+  /**
+   * Converts a sequence of Task[Return] to a Task that returns a sequence of Return in parallel. Similar to sequence,
+   * but starts a new Task per entry in the sequence. Warning: For large sequences this can be extremely heavy on the
+   * CPU. For larger sequences it's recommended to use Stream.par instead.
+   */
+  def parSequence[Return: ClassTag, C[_]](tasks: C[Task[Return]])
+                                         (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
+                                          asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = flatMap { _ =>
+      val completable = Task.completable[C[Return]]
+      val total = asIterable(tasks).size
+      val array = new Array[Return](total)
+      val completed = new AtomicInteger(0)
+
+      def add(r: Return, index: Int): Unit = {
+        array(index) = r
+        val finished = completed.incrementAndGet()
+        if (finished == total) {
+          completable.success(bf.newBuilder(tasks).addAll(array).result())
+        }
+      }
+
+      asIterable(tasks).zipWithIndex.foreach {
+        case (task, index) => task.map { r =>
+          array(index) = r
+          add(r, index)
+        }.start()
+      }
+      completable
+    }
 
   /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
@@ -231,24 +308,6 @@ object Task extends Task[Unit] {
   override def unit: Task[Unit] = this
 
   /**
-   * Creates a new task with the given value pre-evaluated.
-   *
-   * @param value the return value of this Task
-   * @tparam Return the type of the result produced by the task
-   * @return a new task
-   */
-  def pure[Return](value: Return): Task[Return] = Pure(value)
-
-  /**
-   * Creates a new task with the given function.
-   *
-   * @param f the function to execute
-   * @tparam Return the type of the result produced by the task
-   * @return a new task
-   */
-  def apply[Return](f: => Return): Task[Return] = Single(() => f)
-
-  /**
    * Creates a new task that raises an error when invoked.
    *
    * @param throwable the exception to raise
@@ -263,64 +322,4 @@ object Task extends Task[Unit] {
    * @return a new Completable task
    */
   def completable[Return]: Completable[Return] = new Completable
-
-  /**
-   * Effect to get the current time in milliseconds
-   */
-  def now: Task[Long] = apply(System.currentTimeMillis())
-
-  /**
-   * Defers the execution of the given task.
-   *
-   * @param task the task to defer
-   * @tparam Return the type of the result produced by the task
-   * @return a new task that defers the execution of the given task
-   */
-  def defer[Return](task: => Task[Return]): Task[Return] = Task(task.sync())
-
-  /**
-   * Converts a sequence of Task[Return] to a Task that returns a sequence of Return. Generally cleaner usage via the
-   * implicit in rapid on seq.tasks.
-   */
-  def sequence[Return, C[_]](tasks: C[Task[Return]])
-                            (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
-                                      asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = {
-    val empty = bf.newBuilder(tasks)
-    Task {
-      asIterable(tasks).foldLeft(empty) {
-        case (builder, task) => builder.addOne(task.sync())
-      }.result()
-    }
-  }
-
-  /**
-   * Converts a sequence of Task[Return] to a Task that returns a sequence of Return in parallel. Similar to sequence,
-   * but starts a new Task per entry in the sequence. Warning: For large sequences this can be extremely heavy on the
-   * CPU. For larger sequences it's recommended to use Stream.par instead.
-   */
-  def parSequence[Return: ClassTag, C[_]](tasks: C[Task[Return]])
-                                         (implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
-                                asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] = Task.unit
-    .flatMap { _ =>
-      val completable = Task.completable[C[Return]]
-      val total = asIterable(tasks).size
-      val array = new Array[Return](total)
-      val completed = new AtomicInteger(0)
-
-      def add(r: Return, index: Int): Unit = {
-        array(index) = r
-        val finished = completed.incrementAndGet()
-        if (finished == total) {
-          completable.success(bf.newBuilder(tasks).addAll(array).result())
-        }
-      }
-
-      asIterable(tasks).zipWithIndex.foreach {
-        case (task, index) => task.map { r =>
-          array(index) = r
-          add(r, index)
-        }.start()
-      }
-      completable
-    }
 }
