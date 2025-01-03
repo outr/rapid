@@ -1,5 +1,8 @@
 package rapid
 
+import rapid.monitor.TaskMonitor
+import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, UnitTask}
+
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.tailrec
 import scala.collection.BuildFrom
@@ -13,21 +16,6 @@ import scala.util.{Failure, Success, Try}
  * @tparam Return the type of the result produced by this task
  */
 trait Task[Return] extends Any {
-/*  protected def invokeInternal(): Return = Task.Monitor match {
-    case Opt.Value(d) =>
-      d.start(this)
-      try {
-        val r = invoke()
-        d.success(this, r)
-        r
-      } catch {
-        case t: Throwable =>
-          d.error(this, t)
-          throw t
-      }
-    case Opt.Empty => invoke()
-  }*/
-
   /**
    * Synonym for sync(). Allows for clean usage with near transparent invocations.
    *
@@ -35,23 +23,61 @@ trait Task[Return] extends Any {
    */
   def apply(): Return = sync()
 
-  protected def selfContained: Boolean = false
-
   /**
    * Synchronously (blocking) executes the task and returns the result.
    *
    * @return the result of the task
    */
   def sync(): Return = {
+    var previous: Any = ()
+    var list: List[Any] = List(this)
+
     @tailrec
-    def loop(current: Task[Any]): Return = current match {
-      case Task.Pure(value) => value.asInstanceOf[Return]
-      case Task.Single(f) => f().asInstanceOf[Return]
-      case Task.Error(throwable) => throw throwable
-      case _ if current.selfContained => current.sync().asInstanceOf[Return]
-      case Task.FlatMap(source, forge) => loop(forge(source.sync()))
+    def recurse(): Return = {
+      list match {
+        case Nil => previous.asInstanceOf[Return]
+        case head :: tail =>
+          list = tail
+          Task.monitor.foreach { m =>
+            head match {
+              case t: Task[_] => m.start(t)
+              case _ => // Ignore Forge
+            }
+          }
+          try {
+            head match {
+              case _: UnitTask => previous = ()
+              case PureTask(value) => previous = value
+              case SingleTask(f) => previous = f()
+              case ErrorTask(throwable) => throw throwable
+              case c: CompletableTask[_] => previous = c.sync()
+              case f: Fiber[_] => previous = f.sync()
+              case f: Forge[_, _] =>
+                list = f.asInstanceOf[Forge[Any, Any]](previous) :: list
+              case FlatMapTask(source, forge) =>
+                list = source :: forge :: list
+              case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
+            }
+            Task.monitor.foreach { m =>
+              head match {
+                case t: Task[_] => m.success(t.asInstanceOf[Task[Any]], previous)
+                case _ => // Ignore Forge
+              }
+            }
+          } catch {
+            case throwable: Throwable =>
+              Task.monitor.foreach { m =>
+                head match {
+                  case t: Task[_] => m.error(t, throwable)
+                  case _ => // Ignore Forge
+                }
+              }
+              throw throwable
+          }
+          recurse()
+      }
     }
-    loop(this.asInstanceOf[Task[Any]])
+    recurse()
   }
 
   /**
@@ -59,7 +85,11 @@ trait Task[Return] extends Any {
    *
    * @return a `Fiber` representing the running task
    */
-  def start(): Fiber[Return] = Platform.createFiber(this)
+  def start(): Fiber[Return] = {
+    val f = Platform.createFiber(this)
+    Task.monitor.foreach(_.fiberCreated(f, this))
+    f
+  }
 
   /**
    * Awaits (blocking) the completion of the task and returns the result.
@@ -83,7 +113,11 @@ trait Task[Return] extends Any {
    * @param throwable the exception to raise
    * @return a new Error task
    */
-  def error[T](throwable: Throwable): Task[T] = flatMap(_ => Task.Error[T](throwable))
+  def error[T](throwable: Throwable): Task[T] = next {
+    val e = ErrorTask[T](throwable)
+    Task.monitor.foreach(_.created(e))
+    e
+  }
 
   /**
    * Handles error in task execution.
@@ -124,7 +158,11 @@ trait Task[Return] extends Any {
    * @tparam T the type of the result produced by the task
    * @return a new task
    */
-  def pure[T](value: T): Task[T] = flatMap(_ => Task.Pure(value))
+  def pure[T](value: T): Task[T] = next {
+    val t = PureTask(value)
+    Task.monitor.foreach(_.created(t))
+    t
+  }
 
   /**
    * Transforms the result of this task to the result of the supplied function.
@@ -133,7 +171,11 @@ trait Task[Return] extends Any {
    * @tparam T the type of the result produced by the task
    * @return a new task
    */
-  def apply[T](f: => T): Task[T] = Task.Single(() => f)
+  def apply[T](f: => T): Task[T] = {
+    val t = SingleTask(() => f)
+    Task.monitor.foreach(_.created(t))
+    t
+  }
 
   /**
    * Similar to map, but does not change the value.
@@ -153,7 +195,11 @@ trait Task[Return] extends Any {
    * @tparam T the type of the result of the new task
    * @return a new task with the transformed result
    */
-  def flatMap[T](f: Return => Task[T]): Task[T] = Task.FlatMap(this, Forge(f))
+  def flatMap[T](f: Return => Task[T]): Task[T] = {
+    val t = FlatMapTask(this, Forge(f))
+    Task.monitor.foreach(_.created(t))
+    t
+  }
 
   /**
    * Similar to flatMap, but ignores the return propagating the current return value on.
@@ -164,6 +210,14 @@ trait Task[Return] extends Any {
   def flatTap(f: Return => Task[_]): Task[Return] = flatMap { r =>
     f(r).map(_ => r)
   }
+
+  /**
+   * Works like flatMap, but ignores the previous value.
+   *
+   * @param task the next task to process
+   * @tparam T the type of the result of the new task
+   */
+  def next[T](task: Task[T]): Task[T] = flatMap(_ => task)
 
   /**
    * Chains a sleep to the end of this task.
@@ -204,7 +258,7 @@ trait Task[Return] extends Any {
    *
    * @return a new task that returns `Unit` after the existing task completes
    */
-  def unit: Task[Unit] = map(_ => ())
+  def unit: Task[Unit] = map(_ => task.UnitTask)
 
   /**
    * Combines the two tasks to execute at the same time
@@ -288,7 +342,7 @@ trait Task[Return] extends Any {
    * @tparam T the type of the result produced by the task
    * @return a new Completable task
    */
-  def withCompletable[T]: Task[Task.Completable[T]] = map(_ => Task.completable)
+  def withCompletable[T]: Task[CompletableTask[T]] = map(_ => Task.completable)
 
   /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
@@ -297,60 +351,12 @@ trait Task[Return] extends Any {
     scala.concurrent.Future(this.sync())
 }
 
-object Task extends Task[Unit] {
-  case class Pure[Return](value: Return) extends AnyVal with Task[Return] {
-    override def toString: String = s"Pure($value)"
+object Task extends task.UnitTask {
+  var monitor: Opt[TaskMonitor] = Opt.Empty
+
+  def completable[Return]: CompletableTask[Return] = {
+    val c = new CompletableTask[Return]
+    Task.monitor.foreach(_.created(c))
+    c
   }
-
-  case class Single[Return](f: () => Return) extends AnyVal with Task[Return] {
-    override def toString: String = "Single"
-  }
-
-  case class FlatMap[Input, Return](source: Task[Input], forge: Forge[Input, Return]) extends Task[Return] {
-    override def toString: String = "FlatMap"
-  }
-
-  case class Error[Return](throwable: Throwable) extends AnyVal with Task[Return] {
-    override def flatMap[T](f: Return => Task[T]): Task[T] = this.asInstanceOf[Task[T]]
-
-    override def toString: String = s"Error(${throwable.getMessage})"
-  }
-
-  class Completable[Return] extends Task[Return] {
-    @volatile private var result: Option[Try[Return]] = None
-
-    override protected def selfContained: Boolean = true
-
-    def success(result: Return): Unit = synchronized {
-      this.result = Some(Success(result))
-      notifyAll()
-    }
-
-    def failure(throwable: Throwable): Unit = synchronized {
-      this.result = Some(Failure(throwable))
-      notifyAll()
-    }
-
-    override def sync(): Return = synchronized {
-      while (result.isEmpty) {
-        wait()
-      }
-      result.get.get
-    }
-
-    override def toString: String = "Completable"
-  }
-
-  override protected def selfContained: Boolean = true
-
-  override def sync(): Unit = ()
-
-  /**
-   * A task that returns `Unit`.
-   */
-  override def unit: Task[Unit] = this
-
-  def completable[Return]: Completable[Return] = new Completable[Return]
-
-  override def toString: String = "Unit"
 }

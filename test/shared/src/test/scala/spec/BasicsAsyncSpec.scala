@@ -3,9 +3,16 @@ package spec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 import rapid._
+import rapid.monitor.StatsTaskMonitor
 
 class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
   "Basics sync" should {
+    val monitor = new StatsTaskMonitor
+
+    "set up stats monitor" in {
+      Task.monitor = Opt(monitor)
+      Task.succeed
+    }
     "handle a simple task" in {
       val i = Task {
         5 * 5
@@ -55,7 +62,7 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
         s.length should be(32)
       }
     }
-    "flatMap millions of times without overflowing" in {
+    "flatMap 10 million times without overflowing" in {
       val max = 10_000_000
       def count(i: Int): Task[Int] = if (i >= max) {
         Task.pure(i)
@@ -65,6 +72,10 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
       count(0).map { result =>
         result should be(max)
       }
+    }
+    "write stats out" in {
+      println(monitor.report())
+      Task.succeed
     }
   }
 }

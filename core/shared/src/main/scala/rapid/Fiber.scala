@@ -1,9 +1,12 @@
 package rapid
 
+import java.util.concurrent.CompletableFuture
+import scala.annotation.nowarn
+import scala.concurrent.{Await, Future}
+import scala.util.{Failure, Success}
+
 trait Fiber[Return] extends Task[Return] {
   override def start(): Fiber[Return] = this
-
-  override protected def selfContained: Boolean = true
 
   /**
    * Attempts to cancel the Fiber. Returns true if successful.
@@ -16,8 +19,15 @@ trait Fiber[Return] extends Task[Return] {
 }
 
 object Fiber {
-  /*def fromFuture[Return](future: Future[Return]): Fiber[Return] =
-    () => Await.result(future, 24.hours)
+  @nowarn()
+  def fromFuture[Return](future: Future[Return]): Fiber[Return] = {
+    val completable = Task.completable[Return]
+    future.onComplete {
+      case Success(value) => completable.success(value)
+      case Failure(exception) => completable.failure(exception)
+    }(scala.concurrent.ExecutionContext.Implicits.global)
+    completable.start()
+  }
 
   def fromFuture[Return](future: CompletableFuture[Return]): Fiber[Return] = {
     val completable = Task.completable[Return]
@@ -26,5 +36,5 @@ object Fiber {
       case (r, _) => completable.success(r)
     }
     completable.start()
-  }*/
+  }
 }
