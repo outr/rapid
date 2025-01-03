@@ -1,26 +1,22 @@
 package rapid
 
-import java.util.concurrent.CompletableFuture
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-
 trait Fiber[Return] extends Task[Return] {
-  Task.Monitor.foreach(_.fiberCreated(this))
-
   override def start(): Fiber[Return] = this
+
+  override protected def selfContained: Boolean = true
 
   /**
    * Attempts to cancel the Fiber. Returns true if successful.
    */
   def cancel(): Task[Boolean] = Task.pure(false)
 
-  override def await(): Return = invokeInternal()
+  override def await(): Return = sync()
 
   override def toString: String = "Fiber"
 }
 
 object Fiber {
-  def fromFuture[Return](future: Future[Return]): Fiber[Return] =
+  /*def fromFuture[Return](future: Future[Return]): Fiber[Return] =
     () => Await.result(future, 24.hours)
 
   def fromFuture[Return](future: CompletableFuture[Return]): Fiber[Return] = {
@@ -30,5 +26,5 @@ object Fiber {
       case (r, _) => completable.success(r)
     }
     completable.start()
-  }
+  }*/
 }

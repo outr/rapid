@@ -19,7 +19,7 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
     }
   })
 
-  override protected def invoke(): Return = {
+  override def sync(): Return = {
     thread.join()
     if (result == null && cancelled) {
       result = Failure(new CancellationException())

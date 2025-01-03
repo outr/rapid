@@ -55,7 +55,7 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
         s.length should be(32)
       }
     }
-    /*"flatMap millions of times without overflowing" in {
+    "flatMap millions of times without overflowing" in {
       val max = 10_000_000
       def count(i: Int): Task[Int] = if (i >= max) {
         Task.pure(i)
@@ -65,6 +65,6 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
       count(0).map { result =>
         result should be(max)
       }
-    }*/
+    }
   }
 }
