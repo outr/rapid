@@ -48,5 +48,21 @@ class ParallelStreamSpec extends AnyWordSpec with Matchers {
       val task = stream.toList
       task.sync().sum should be(1_409_965_408)
     }
+    "correctly collect on a parallel stream" in {
+      val stream = Stream.emits(0 until 100_000)
+        .par(maxBuffer = 100)(i => Task(i * 2))
+        .collect {
+          case i if i <= 100 && i >= 90 => i
+        }
+      stream.toList.map { list =>
+        list should be(List(90, 92, 94, 96, 98, 100))
+      }.sync()
+    }
+    "correctly fold on a parallel stream" in {
+      val task = Stream.emits(0 until 100_000)
+        .par(maxBuffer = 100)(i => Task(i * 2))
+        .fold(0)((total, i) => Task(total + i))
+      task.sync() should be(1_409_965_408)
+    }
   }
 }

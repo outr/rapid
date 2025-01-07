@@ -1,6 +1,7 @@
 package rapid
 
 import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Try}
 
@@ -8,16 +9,19 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
   @volatile private var result: Try[Return] = _
   @volatile private var cancelled = false
 
-  private val thread = Thread.startVirtualThread(() => {
-    if (!cancelled) {
-      try {
-        result = task.attempt.sync()
-      } catch {
-        case _: InterruptedException if cancelled => result = Failure(new CancellationException("Task was cancelled"))
-        case t: Throwable => result = Failure(t)
+  private val thread = Thread
+    .ofVirtual()
+    .name(s"rapid-${VirtualThreadFiber.counter.incrementAndGet()}")
+    .start(() => {
+      if (!cancelled) {
+        try {
+          result = task.attempt.sync()
+        } catch {
+          case _: InterruptedException if cancelled => result = Failure(new CancellationException("Task was cancelled"))
+          case t: Throwable => result = Failure(t)
+        }
       }
-    }
-  })
+    })
 
   override def sync(): Return = {
     thread.join()
@@ -42,4 +46,8 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
   } else {
     None
   }
+}
+
+object VirtualThreadFiber {
+  private val counter = new AtomicLong(0L)
 }

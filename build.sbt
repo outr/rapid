@@ -54,14 +54,14 @@ val scalaJsMacrotaskVersion: String = "1.1.1"
 val scalaTestVersion: String = "3.2.19"
 
 lazy val root = project.in(file("."))
-  .aggregate(core.jvm, core.js, core.native, test.jvm, test.js, test.native, cats.jvm, cats.js)
+  .aggregate(core.jvm, test.jvm, cats.jvm)
   .settings(
     name := projectName,
     publish := {},
     publishLocal := {}
   )
 
-lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
   .crossType(CrossType.Full)
   .settings(
     name := s"$projectName-core",
@@ -69,13 +69,13 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
     )
   )
-  .jsSettings(
-    libraryDependencies ++= Seq(
-      "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion,
-    )
-  )
+//  .jsSettings(
+//    libraryDependencies ++= Seq(
+//      "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion,
+//    )
+//  )
 
-lazy val test = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+lazy val test = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
   .crossType(CrossType.Full)
   .dependsOn(core)
   .settings(
@@ -85,7 +85,7 @@ lazy val test = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     )
   )
 
-lazy val cats = crossProject(JVMPlatform, JSPlatform)
+lazy val cats = crossProject(JVMPlatform) //, JSPlatform)
   .crossType(CrossType.Full)
   .dependsOn(core)
   .settings(

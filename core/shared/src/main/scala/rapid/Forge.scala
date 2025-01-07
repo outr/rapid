@@ -17,6 +17,14 @@ trait Forge[Input, Return] extends Any {
    * @return a `Task[Return]` representing the asynchronous computation or work.
    */
   def apply(input: Input): Task[Return]
+
+  def flatMap[R](that: Forge[Return, R]): Forge[Input, R] = Forge { input =>
+    this(input).flatMap(that(_))
+  }
+
+  def map[R](that: Return => R): Forge[Input, R] = flatMap { input =>
+    Task(that(input))
+  }
 }
 
 /**

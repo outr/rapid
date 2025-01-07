@@ -11,7 +11,7 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
   private val iteratorTask: Task[Iterator[T]] = Stream.task(stream.stream)
 
   private val queue = new LockFreeQueue[(T, Int)](stream.maxBuffer)
-  private val ready = new LockFreeQueue[R](stream.maxBuffer)
+  private val ready = new LockFreeQueue[Option[R]](stream.maxBuffer)
   @volatile private var _total = -1
 
   // Feed the iterator into the queue until empty
@@ -35,7 +35,7 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
       val next = queue.dequeue()
       next.foreach {
         case (t, index) =>
-          val r = stream.f(t).sync()
+          val r = stream.forge(t).sync()
           while (counter.get() != index) {
             Thread.`yield`()
           }
@@ -60,21 +60,25 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
   def total: Option[Int] = if (_total == -1) None else Some(_total)
 
   // Processes through the ready queue feeding to handle and finally complete
-  Task(handleNext(0)).start()
+  Task(handleNext(0, 0)).start()
 
   @tailrec
-  private def handleNext(counter: Int): Unit = {
+  private def handleNext(counter: Int, valueCounter: Int): Unit = {
     val next = ready.dequeue()
     if (_total == counter) {
-      complete(counter)
+      complete(valueCounter)
     } else {
-      val c = next match {
-        case Opt.Value(value) =>
-          handle(value)
-          counter + 1
-        case Opt.Empty => counter
+      val (c, vc) = next match {
+        case Opt.Value(value) => value match {
+          case Some(v) =>
+            handle(v)
+            counter + 1 -> (valueCounter + 1)
+          case None =>
+            counter + 1 -> valueCounter
+        }
+        case Opt.Empty => counter -> valueCounter
       }
-      handleNext(c)
+      handleNext(c, vc)
     }
   }
 }

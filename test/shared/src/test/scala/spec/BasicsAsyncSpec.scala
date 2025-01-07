@@ -1,9 +1,12 @@
 package spec
 
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.wordspec.AsyncWordSpec
 import rapid._
 import rapid.monitor.StatsTaskMonitor
+
+import java.util.concurrent.atomic.AtomicInteger
 
 class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
   "Basics sync" should {
@@ -71,6 +74,25 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
       }
       count(0).map { result =>
         result should be(max)
+      }
+    }
+    "create a recursive flatMap method that runs asynchronously" in {
+      val max = 10_000_000
+      val counter = new AtomicInteger(0)
+      def count(i: Int): Task[Int] = if (i >= max) {
+        Task.pure(i)
+      } else {
+        counter.incrementAndGet()
+        Task(i + 1).flatMap(count)
+      }
+      count(0).start()
+      def waitForCount(): Task[Unit] = if (counter.get() == max) {
+        Task.unit
+      } else {
+        Task.sleep(100.millis).next(waitForCount())
+      }
+      waitForCount().map { _ =>
+        counter.get() should be(max)
       }
     }
     "write stats out" in {

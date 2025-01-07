@@ -18,6 +18,8 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    */
   def filter(p: Return => Boolean): Stream[Return] = new Stream(task.map(_.filter(p)))
 
+  def filterNot(p: Return => Boolean): Stream[Return] = filter(r => !p(r))
+
   /**
    * Builds a new stream by applying a partial function to all elements of this stream on which the function is defined.
    *
@@ -117,7 +119,7 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
 
         val buffer = new scala.collection.mutable.ArrayBuffer[Return](chunkSize)
         var count = 0
-        while (count < size && i.hasNext) {
+        while (count < chunkSize && i.hasNext) {
           buffer += i.next()
           count += 1
         }
@@ -149,6 +151,15 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
     val iterator2 = that.task.sync()
     iterator1 ++ iterator2
   })
+
+  /**
+   * Appends another stream to this stream.
+   *
+   * @param that the stream to append
+   * @tparam T the type of the values in the appended stream
+   * @return a new stream with the values from both streams
+   */
+  def ++[T >: Return](that: => Stream[T]): Stream[T] = append(that)
 
   /**
    * Drains the stream and fully evaluates it.
@@ -205,9 +216,9 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
 
   def par[R](maxThreads: Int = ParallelStream.DefaultMaxThreads,
              maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
-            (f: Return => Task[R]): ParallelStream[Return, R] = ParallelStream(
+            (forge: Forge[Return, R]): ParallelStream[Return, R] = ParallelStream(
     stream = this,
-    f = f,
+    forge = forge.map(Option.apply),
     maxThreads = maxThreads,
     maxBuffer = maxBuffer
   )

@@ -149,7 +149,7 @@ trait Task[Return] extends Any {
    * @tparam T the type of the transformed result
    * @return a new task with the transformed result
    */
-  def map[T](f: Return => T): Task[T] = Task(f(sync()))
+  def map[T](f: Return => T): Task[T] = flatMap(r => Task(f(r)))
 
   /**
    * Transforms this task to a pure result.
@@ -217,7 +217,7 @@ trait Task[Return] extends Any {
    * @param task the next task to process
    * @tparam T the type of the result of the new task
    */
-  def next[T](task: Task[T]): Task[T] = flatMap(_ => task)
+  def next[T](task: => Task[T]): Task[T] = flatMap(_ => task)
 
   /**
    * Chains a sleep to the end of this task.
@@ -276,7 +276,7 @@ trait Task[Return] extends Any {
    */
   def singleton: Task[Return] = {
     val triggered = new AtomicBoolean(false)
-    val completable = Task.withCompletable[Return].sync()
+    val completable = Task.completable[Return]
     val actualTask = map { r =>
       completable.success(r)
     }
@@ -314,24 +314,28 @@ trait Task[Return] extends Any {
   def parSequence[T: ClassTag, C[_]](tasks: C[Task[T]])
                                     (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
                                      asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
-    val completable = Task.withCompletable[C[T]].sync()
+    val completable = Task.completable[C[T]]
     val total = asIterable(tasks).size
-    val array = new Array[T](total)
-    val completed = new AtomicInteger(0)
+    if (total == 0) {
+      completable.success(bf.newBuilder(tasks).result())
+    } else {
+      val array = new Array[T](total)
+      val completed = new AtomicInteger(0)
 
-    def add(r: T, index: Int): Unit = {
-      array(index) = r
-      val finished = completed.incrementAndGet()
-      if (finished == total) {
-        completable.success(bf.newBuilder(tasks).addAll(array).result())
-      }
-    }
-
-    asIterable(tasks).zipWithIndex.foreach {
-      case (task, index) => task.map { r =>
+      def add(r: T, index: Int): Unit = {
         array(index) = r
-        add(r, index)
-      }.start()
+        val finished = completed.incrementAndGet()
+        if (finished == total) {
+          completable.success(bf.newBuilder(tasks).addAll(array).result())
+        }
+      }
+
+      asIterable(tasks).zipWithIndex.foreach {
+        case (task, index) => task.map { r =>
+          array(index) = r
+          add(r, index)
+        }.start()
+      }
     }
     completable
   }
