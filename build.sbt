@@ -17,7 +17,7 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "0.6.0-SNAPSHOT"
+ThisBuild / version := "0.6.0"
 ThisBuild / scalaVersion := scala213
 ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
@@ -44,6 +44,8 @@ ThisBuild / resolvers += Resolver.mavenLocal
 ThisBuild / outputStrategy := Some(StdoutOutput)
 
 ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
+
+/// Testing and Benchmarking Libraries
 
 val catsVersion: String = "3.5.7"
 
