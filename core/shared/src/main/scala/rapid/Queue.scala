@@ -30,7 +30,7 @@ case class Queue[T](maxSize: Int) {
 
   def dequeue(): Opt[T] = {
     val o = Opt(q.poll())
-    if (o.isNonEmpty) {
+    if (o.notEmpty) {
       s.decrementAndGet()
     }
     o
