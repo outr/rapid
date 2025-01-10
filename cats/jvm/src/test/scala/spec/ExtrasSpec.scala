@@ -1,12 +1,16 @@
 package spec
 
 import cats.effect.unsafe.implicits.global
+import org.scalatest.concurrent.TimeLimitedTests
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import org.scalatest.wordspec.AnyWordSpec
 import rapid.Task
 import rapid.cats._
 
-class ExtrasSpec extends AnyWordSpec with Matchers {
+class ExtrasSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "TaskExtras" should {
     "convert Task to IO" in {
       val task = Task(42)

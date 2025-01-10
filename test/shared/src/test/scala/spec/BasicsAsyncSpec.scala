@@ -1,6 +1,8 @@
 package spec
 
+import org.scalatest.concurrent.AsyncTimeLimitedTests
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.wordspec.AsyncWordSpec
 import rapid._
@@ -8,7 +10,9 @@ import rapid.monitor.StatsTaskMonitor
 
 import java.util.concurrent.atomic.AtomicInteger
 
-class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
+class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers with AsyncTimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "Basics sync" should {
     val monitor = new StatsTaskMonitor
 

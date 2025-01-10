@@ -1,13 +1,17 @@
 package spec
 
+import org.scalatest.concurrent.{AsyncTimeLimitedTests, TimeLimitedTests}
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import org.scalatest.wordspec.AsyncWordSpec
 import rapid.{AsyncTaskSpec, Platform, Task}
 
 import scala.concurrent.CancellationException
 import scala.concurrent.duration.DurationInt
 
-class BlockableSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers {
+class BlockableSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers with AsyncTimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "Blockable" should {
     "handle a completable partway through a chain" in {
       Task.sleep(250.millis).withCompletable[String].flatMap { c =>

@@ -1,10 +1,14 @@
 package spec
 
+import org.scalatest.concurrent.TimeLimitedTests
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import org.scalatest.wordspec.AnyWordSpec
 import rapid.Task
 
-class FiberSpec extends AnyWordSpec with Matchers {
+class FiberSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "Fiber" should {
     "start and await a task" in {
       val task = Task { 5 * 5 }
