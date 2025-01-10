@@ -17,7 +17,7 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "0.7.0-SNAPSHOT"
+ThisBuild / version := "0.7.0"
 ThisBuild / scalaVersion := scala213
 ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
@@ -68,7 +68,6 @@ lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
   .settings(
     name := s"$projectName-core",
     libraryDependencies ++= Seq(
-      "com.outr" %%% "scribe" % scribeVersion,
       "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
     )
   )
