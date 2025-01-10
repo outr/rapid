@@ -104,5 +104,14 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       }
       verify.sync()
     }
+    "verify the same task is functionally evaluated" in {
+      val task = Task(System.currentTimeMillis()).map(_ / 1000.0)
+      val now = System.currentTimeMillis() / 1000.0
+      task.sync() shouldBe >=(now)
+      Task.sleep(1.second).sync()
+      val later = System.currentTimeMillis() / 1000.0
+      task.sync() shouldBe >(now)
+      task.sync() shouldBe >=(later)
+    }
   }
 }

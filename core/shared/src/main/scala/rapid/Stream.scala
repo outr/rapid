@@ -9,7 +9,7 @@ import scala.io.Source
  *
  * @tparam Return the type of the values produced by this stream
  */
-class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
+class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   /**
    * Filters the values in the stream using the given predicate.
    *
@@ -135,7 +135,7 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @param grouper the grouping function
    * @tparam G the group key
    */
-  def groupSequential[G](grouper: Return => G): Stream[Grouped[G, Return]] = new Stream(task.map { iterator =>
+  def groupSequential[G, R >: Return](grouper: R => G): Stream[Grouped[G, R]] = new Stream(task.map { iterator =>
     GroupedIterator(iterator, grouper)
   })
 
@@ -214,9 +214,9 @@ class Stream[Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    */
   def count: Task[Int] = task.map(_.size)
 
-  def par[R](maxThreads: Int = ParallelStream.DefaultMaxThreads,
+  def par[T, R >: Return](maxThreads: Int = ParallelStream.DefaultMaxThreads,
              maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
-            (forge: Forge[Return, R]): ParallelStream[Return, R] = ParallelStream(
+            (forge: Forge[R, T]): ParallelStream[R, T] = ParallelStream(
     stream = this,
     forge = forge.map(Option.apply),
     maxThreads = maxThreads,

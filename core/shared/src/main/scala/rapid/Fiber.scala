@@ -5,7 +5,7 @@ import scala.annotation.nowarn
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success}
 
-trait Fiber[Return] extends Task[Return] {
+trait Fiber[+Return] extends Task[Return] {
   override def start(): Fiber[Return] = this
 
   /**

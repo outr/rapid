@@ -15,7 +15,7 @@ import scala.util.{Failure, Success, Try}
  *
  * @tparam Return the type of the result produced by this task
  */
-trait Task[Return] extends Any {
+trait Task[+Return] extends Any {
   /**
    * Synchronously (blocking) executes the task and returns the result.
    *
@@ -114,9 +114,9 @@ trait Task[Return] extends Any {
    * Handles error in task execution.
    *
    * @param f handler
-   * @return Task[Return]
+   * @return Task[R]
    */
-  def handleError(f: Throwable => Task[Return]): Task[Return] = attempt
+  def handleError[R >: Return](f: Throwable => Task[R]): Task[R] = attempt
     .flatMap {
       case Success(r) => Task.pure(r)
       case Failure(t) => f(t)
