@@ -1,10 +1,14 @@
 package spec
 
+import org.scalatest.concurrent.TimeLimitedTests
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import rapid._
 
-class StreamSpec extends AnyWordSpec with Matchers {
+class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "Stream" should {
     "correctly map elements" in {
       val stream = Stream.emits(List(1, 2, 3, 4))

@@ -1,12 +1,16 @@
 package spec
 
+import org.scalatest.concurrent.TimeLimitedTests
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
 
 import scala.concurrent.duration._
 
-class TaskSpec extends AnyWordSpec with Matchers {
+class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "Task" should {
     "execute a simple task" in {
       val task = Task { 5 * 5 }

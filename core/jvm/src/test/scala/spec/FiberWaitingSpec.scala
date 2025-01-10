@@ -1,12 +1,16 @@
 package spec
 
+import org.scalatest.concurrent.TimeLimitedTests
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
 
 import scala.concurrent.duration._
 
-class FiberWaitingSpec extends AnyWordSpec with Matchers {
+class FiberWaitingSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "Fiber waiting" should {
     "await with a timeout" in {
       val task = Task {

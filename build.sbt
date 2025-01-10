@@ -43,7 +43,9 @@ ThisBuild / resolvers += Resolver.mavenLocal
 
 ThisBuild / outputStrategy := Some(StdoutOutput)
 
-ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
+ThisBuild / Test / testOptions += Tests.Argument("-oDF")
+
+ThisBuild / Test / parallelExecution := false
 
 /// Testing and Benchmarking Libraries
 

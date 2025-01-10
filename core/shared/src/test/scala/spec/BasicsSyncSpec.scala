@@ -1,13 +1,17 @@
 package spec
 
+import org.scalatest.concurrent.TimeLimitedTests
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Minute, Span}
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
 
 import scala.concurrent.CancellationException
 
-class BasicsSyncSpec extends AnyWordSpec with Matchers {
+class BasicsSyncSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
+  override def timeLimit: Span = Span(1, Minute)
+
   "Basics sync" should {
     "handle a simple task" in {
       val i = Task {
