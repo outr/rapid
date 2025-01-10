@@ -17,13 +17,6 @@ import scala.util.{Failure, Success, Try}
  */
 trait Task[Return] extends Any {
   /**
-   * Synonym for sync(). Allows for clean usage with near transparent invocations.
-   *
-   * @return the result of the task
-   */
-  def apply(): Return = sync()
-
-  /**
    * Synchronously (blocking) executes the task and returns the result.
    *
    * @return the result of the task
@@ -82,8 +75,6 @@ trait Task[Return] extends Any {
 
   /**
    * Starts the task and returns a `Fiber` representing the running task.
-   *
-   * @return a `Fiber` representing the running task
    */
   def start(): Fiber[Return] = {
     val f = Platform.createFiber(this)
@@ -165,17 +156,13 @@ trait Task[Return] extends Any {
   }
 
   /**
-   * Transforms the result of this task to the result of the supplied function.
+   * Transforms the result of this task to the result of the supplied function ignoring the previous result.
    *
    * @param f the function to execute
    * @tparam T the type of the result produced by the task
    * @return a new task
    */
-  def apply[T](f: => T): Task[T] = {
-    val t = SingleTask(() => f)
-    Task.monitor.foreach(_.created(t))
-    t
-  }
+  def function[T](f: => T): Task[T] = map(_ => f)
 
   /**
    * Similar to map, but does not change the value.
@@ -357,6 +344,12 @@ trait Task[Return] extends Any {
 
 object Task extends task.UnitTask {
   var monitor: Opt[TaskMonitor] = Opt.Empty
+
+  def apply[T](f: => T): Task[T] = {
+    val t = SingleTask(() => f)
+    Task.monitor.foreach(_.created(t))
+    t
+  }
 
   def completable[Return]: CompletableTask[Return] = {
     val c = new CompletableTask[Return]
