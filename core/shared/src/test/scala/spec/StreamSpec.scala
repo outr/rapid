@@ -6,6 +6,9 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Minute, Span}
 import rapid._
 
+import java.io.File
+import java.nio.file.Files
+
 class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
 
@@ -73,6 +76,14 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val stream = Stream(Some(1), None, Some(2), None, Some(3))
       val result = stream.unNone.toList.sync()
       result should be(List(1, 2, 3))
+    }
+    "write a String to a File via byte stream" in {
+      val stream = Stream.emits("Hello, World!".getBytes("UTF-8").toList)   // TODO: Figure out why .toSeq fails
+      val file = new File("test.txt")
+      val bytes = stream.toFile(file).sync()
+      bytes should be(13)
+      Files.readString(file.toPath) should be("Hello, World!")
+      file.delete()
     }
   }
 }

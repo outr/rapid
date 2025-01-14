@@ -256,7 +256,7 @@ object Stream {
    * @tparam Return the type of the values
    * @return a new stream that emits the values in the sequence
    */
-  def emits[Return](seq: Seq[Return]): Stream[Return] = new Stream[Return](Task(seq.iterator))
+  def emits[Return](seq: Seq[Return]): Stream[Return] = fromIterator[Return](Task(seq.iterator))
 
   /**
    * Creates a stream from an iterator task.
