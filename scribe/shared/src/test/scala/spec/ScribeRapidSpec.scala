@@ -19,7 +19,7 @@ class ScribeRapidSpec extends AnyWordSpec with Matchers {
       .replace()
 
     "do rapid logging" in {
-      logger.info("1").map { _ =>
+      log.info("1").map { _ =>
         messages should be(List("1"))
       }.sync()
     }
@@ -35,7 +35,7 @@ class ScribeRapidSpec extends AnyWordSpec with Matchers {
     "do reference logging" in {
       messages = Nil
 
-      logger.info("4").map { _ =>
+      log.info("4").map { _ =>
         messages should be(List("4"))
       }.sync()
     }
