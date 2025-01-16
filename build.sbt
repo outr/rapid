@@ -17,7 +17,7 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "0.8.0"
+ThisBuild / version := "0.9.0-SNAPSHOT"
 ThisBuild / scalaVersion := scala213
 ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
@@ -47,6 +47,8 @@ ThisBuild / Test / testOptions += Tests.Argument("-oDF")
 
 ThisBuild / Test / parallelExecution := false
 
+val scribeVersion: String = "3.16.0"
+
 /// Testing and Benchmarking Libraries
 
 val catsVersion: String = "3.5.7"
@@ -58,7 +60,7 @@ val scalaJsMacrotaskVersion: String = "1.1.1"
 val scalaTestVersion: String = "3.2.19"
 
 lazy val root = project.in(file("."))
-  .aggregate(core.jvm, test.jvm, cats.jvm)
+  .aggregate(core.jvm, scribe.jvm, test.jvm, cats.jvm)
   .settings(
     name := projectName,
     publish := {},
@@ -78,6 +80,17 @@ lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
 //      "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion,
 //    )
 //  )
+
+lazy val scribe = crossProject(JVMPlatform)
+  .crossType(CrossType.Full)
+  .dependsOn(core)
+  .settings(
+    name := s"$projectName-scribe",
+    libraryDependencies ++= Seq(
+      "com.outr" %%% "scribe" % scribeVersion,
+      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
+    )
+  )
 
 lazy val test = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
   .crossType(CrossType.Full)
