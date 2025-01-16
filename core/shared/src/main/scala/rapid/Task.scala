@@ -74,9 +74,16 @@ trait Task[+Return] extends Any {
   }
 
   /**
+   * Synonym for sync(). Allows for clean usage with near transparent invocations.
+   *
+   * @return the result of the task
+   */
+  def apply(): Return = sync()
+
+  /**
    * Starts the task and returns a `Fiber` representing the running task.
    */
-  def start(): Fiber[Return] = {
+  def start: Task[Fiber[Return]] = Task {
     val f = Platform.createFiber(this)
     Task.monitor.foreach(_.fiberCreated(f, this))
     f

@@ -78,7 +78,7 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       result should be(List(1, 2, 3))
     }
     "write a String to a File via byte stream" in {
-      val stream = Stream.emits("Hello, World!".getBytes("UTF-8").toList)   // TODO: Figure out why .toSeq fails
+      val stream = Stream.emits("Hello, World!".getBytes("UTF-8").toSeq)
       val file = new File("test.txt")
       val bytes = stream.toFile(file).sync()
       bytes should be(13)

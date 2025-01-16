@@ -6,7 +6,7 @@ import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success}
 
 trait Fiber[+Return] extends Task[Return] {
-  override def start(): Fiber[Return] = this
+  override def start: Task[Fiber[Return]] = Task.pure(this)
 
   /**
    * Attempts to cancel the Fiber. Returns true if successful.
