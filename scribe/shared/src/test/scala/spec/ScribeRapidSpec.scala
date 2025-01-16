@@ -45,6 +45,13 @@ class ScribeRapidSpec extends AnyWordSpec with Matchers {
         messages should be(List("5"))
       }.sync()
     }
+    "log an error properly on a Fiber" in {
+      messages = Nil
+      Task {
+        throw new RuntimeException("Failure!")
+      }.logErrors.handleError(_ => Task.unit).sync()
+      messages.map(_.takeWhile(_ != '\n')) should be(List("java.lang.RuntimeException: Failure!"))
+    }
   }
 
   class Biz extends RapidLoggerSupport {
