@@ -140,6 +140,15 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   })
 
   /**
+   * Groups at a separator
+   *
+   * @param separator returns true if this entry represents a separator
+   */
+  def group(separator: Return => Boolean): Stream[List[Return]] = new Stream(task.map { iterator =>
+    new GroupingIterator[Return](iterator, separator)
+  })
+
+  /**
    * Appends another stream to this stream.
    *
    * @param that the stream to append

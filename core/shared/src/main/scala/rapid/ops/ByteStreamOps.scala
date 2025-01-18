@@ -1,6 +1,6 @@
 package rapid.ops
 
-import rapid.Task
+import rapid._
 
 import java.io.{BufferedOutputStream, File, FileOutputStream}
 import java.nio.file.Path
@@ -14,6 +14,10 @@ case class ByteStreamOps(stream: rapid.Stream[Byte]) {
       out.close()
     })
   }
+
+  def chars: rapid.Stream[Char] = stream.map(_.toChar)
+
+  def lines: rapid.Stream[String] = chars.lines
 
   def toPath(path: Path): Task[Long] = toFile(path.toFile)
 }

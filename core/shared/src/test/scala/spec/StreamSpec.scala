@@ -85,5 +85,13 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       Files.readString(file.toPath) should be("Hello, World!")
       file.delete()
     }
+    "read bytes into lines" in {
+      val stream = Stream.emits(
+        """This
+          |is
+          |multiple
+          |lines""".stripMargin.getBytes("UTF-8").toIndexedSeq)
+      stream.lines.toList.sync() should be(List("This", "is", "multiple", "lines"))
+    }
   }
 }

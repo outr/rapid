@@ -1,6 +1,6 @@
 package rapid
 
-import rapid.ops.{ByteStreamOps, OptionParallelStreamOps, OptionStreamOps, TaskSeqOps, TaskTaskOps}
+import rapid.ops.{ByteStreamOps, CharStreamOps, OptionParallelStreamOps, OptionStreamOps, TaskSeqOps, TaskTaskOps}
 
 import scala.language.implicitConversions
 
@@ -10,4 +10,5 @@ trait RapidPackage {
   implicit def optionParallelStream[T, Return](stream: ParallelStream[T, Option[Return]]): OptionParallelStreamOps[T, Return] = OptionParallelStreamOps(stream)
   implicit def taskTaskOps[Return](task: Task[Task[Return]]): TaskTaskOps[Return] = TaskTaskOps(task)
   implicit def byteStream(stream: Stream[Byte]): ByteStreamOps = ByteStreamOps(stream)
+  implicit def charStream(stream: Stream[Char]): CharStreamOps = CharStreamOps(stream)
 }
