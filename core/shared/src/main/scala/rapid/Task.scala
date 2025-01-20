@@ -134,7 +134,7 @@ trait Task[+Return] extends Any {
    *
    * @param task the task to guarantee invocation of
    */
-  def guarantee(task: Task[Unit]): Task[Return] = attempt
+  def guarantee(task: => Task[Unit]): Task[Return] = attempt
     .flatTap { _ =>
       task
     }
