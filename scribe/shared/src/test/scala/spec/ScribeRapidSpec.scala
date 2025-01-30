@@ -3,6 +3,7 @@ package spec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
+import rapid.logger._
 import scribe.handler.LogHandler
 import scribe.{LogRecord, Logger}
 
@@ -19,7 +20,7 @@ class ScribeRapidSpec extends AnyWordSpec with Matchers {
       .replace()
 
     "do rapid logging" in {
-      log.info("1").map { _ =>
+      logger.info("1").map { _ =>
         messages should be(List("1"))
       }.sync()
     }
@@ -35,7 +36,7 @@ class ScribeRapidSpec extends AnyWordSpec with Matchers {
     "do reference logging" in {
       messages = Nil
 
-      log.info("4").map { _ =>
+      logger.info("4").map { _ =>
         messages should be(List("4"))
       }.sync()
     }
