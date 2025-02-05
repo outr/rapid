@@ -1,7 +1,7 @@
 package rapid
 
 import rapid.monitor.TaskMonitor
-import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, UnitTask}
+import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, Taskable, UnitTask}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.tailrec
@@ -42,6 +42,7 @@ trait Task[+Return] extends Any {
               case _: UnitTask => previous = ()
               case PureTask(value) => previous = value
               case SingleTask(f) => previous = f()
+              case t: Taskable[_] => previous = t.toTask.sync()
               case ErrorTask(throwable) => throw throwable
               case c: CompletableTask[_] => previous = c.sync()
               case f: Fiber[_] => previous = f.sync()

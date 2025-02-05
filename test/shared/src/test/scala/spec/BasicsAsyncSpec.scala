@@ -65,7 +65,7 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       }
     }
     "create a Unique value" in {
-      Unique(length = 32).map { s =>
+      Unique.withLength(32).map { s =>
         s.length should be(32)
       }
     }
