@@ -54,7 +54,7 @@ trait Task[+Return] extends Any {
             }
             Task.monitor.foreach { m =>
               head match {
-                case t: Task[_] => m.success(t.asInstanceOf[Task[Any]], previous)
+                case t: Task[_] => m.success(t, previous)
                 case _ => // Ignore Forge
               }
             }
