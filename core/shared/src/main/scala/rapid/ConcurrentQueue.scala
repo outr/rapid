@@ -3,7 +3,7 @@ package rapid
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
-case class Queue[T](maxSize: Int) {
+case class ConcurrentQueue[T](capacity: Int) {
   private val q = new ConcurrentLinkedQueue[T]
   private val s = new AtomicInteger(0)
 
@@ -14,7 +14,7 @@ case class Queue[T](maxSize: Int) {
   def enqueue(value: T): Boolean = {
     var incremented = false
     s.updateAndGet((operand: Int) => {
-      if (operand < maxSize) {
+      if (operand < capacity) {
         incremented = true
         operand + 1
       } else {

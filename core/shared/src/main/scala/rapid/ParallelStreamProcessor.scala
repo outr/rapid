@@ -1,7 +1,5 @@
 package rapid
 
-import rapid.ops.TaskSeqOps
-
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
 
@@ -51,11 +49,11 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
       }
     }
 
-    val tasks = (0 until stream.maxThreads).toList.map { _ =>
-      Task(recurse())
+    // Start a Fiber up to maxThreads
+    (0 until stream.maxThreads).toList.map { _ =>
+      Task(recurse()).start()
     }
-    TaskSeqOps(tasks).tasks
-  }.start()
+  }
 
   def total: Option[Int] = if (_total == -1) None else Some(_total)
 

@@ -75,4 +75,9 @@ class StreamBenchmark {
   def fs2StreamMap(): List[Int] = {
     verify(fs2Stream.map(_ * 2).compile.toList.unsafeRunSync())
   }
+
+  @Benchmark
+  def fs2ParallelStreamMap(): List[Int] = {
+    verify(fs2Stream.parEvalMap(32)(i => IO(i * 2)).compile.toList.unsafeRunSync())
+  }
 }

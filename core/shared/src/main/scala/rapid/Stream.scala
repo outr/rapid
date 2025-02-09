@@ -93,6 +93,10 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
     iterator.map(f).map(_.sync())
   })
 
+  def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] = new Stream(task.map { iterator =>
+    iterator.map(r => forge(r)).map(_.sync())
+  })
+
   /**
    * Similar to evalMap, but doesn't change the result. Allows doing something with each value without changing the
    * result.
