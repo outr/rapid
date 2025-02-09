@@ -10,6 +10,7 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
 
   private val queue = new LockFreeQueue[(T, Int)](stream.maxBuffer)
   private val ready = new LockFreeQueue[Option[R]](stream.maxBuffer)
+
   @volatile private var _total = -1
 
   // Feed the iterator into the queue until empty
@@ -51,7 +52,10 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
 
     // Start a Fiber up to maxThreads
     (0 until stream.maxThreads).toList.map { _ =>
-      Task(recurse()).start()
+      Task(recurse()).handleError { throwable =>
+        throwable.printStackTrace()
+        throw throwable
+      }.start()
     }
   }
 
