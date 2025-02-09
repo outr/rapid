@@ -53,7 +53,7 @@ class StreamBenchmark {
 
   @Benchmark
   def rapidParallelStreamFilter(): List[Int] = {
-    verify(rapidStream.filter(_ % 2 == 0).par(4)(Task.pure).toList.sync(), size / 2)
+    verify(rapidStream.filter(_ % 2 == 0).par(8)(Task.pure).toList.sync(), size / 2)
   }
 
   @Benchmark

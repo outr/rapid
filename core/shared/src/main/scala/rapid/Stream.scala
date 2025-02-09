@@ -1,6 +1,6 @@
 package rapid
 
-import java.io.{File, FileInputStream, InputStream}
+import java.io.{BufferedInputStream, File, FileInputStream, InputStream}
 import java.nio.file.Path
 import scala.io.Source
 
@@ -177,7 +177,11 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   /**
    * Drains the stream and fully evaluates it.
    */
-  def drain: Task[Unit] = count.unit
+  def drain: Task[Unit] = Task {
+    val it = task.sync()
+    while (it.hasNext) it.next()
+    ()
+  }
 
   /**
    * Cycles through all results but only returns the last element. Will error if the Stream is empty.
@@ -199,8 +203,13 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @tparam T the resulting type
    * @return Task[T]
    */
-  def fold[T](initial: T)(f: (T, Return) => Task[T]): Task[T] = task.map { iterator =>
-    iterator.foldLeft(initial)((t, r) => f(t, r).sync())
+  def fold[T](initial: T)(f: (T, Return) => Task[T]): Task[T] = Task {
+    var result = initial
+    val it = task.sync()
+    while (it.hasNext) {
+      result = f(result, it.next()).sync()
+    }
+    result
   }
 
   /**
@@ -228,8 +237,8 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   def count: Task[Int] = task.map(_.size)
 
   def par[T, R >: Return](maxThreads: Int = ParallelStream.DefaultMaxThreads,
-             maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
-            (forge: Forge[R, T]): ParallelStream[R, T] = ParallelStream(
+                          maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
+                         (forge: Forge[R, T]): ParallelStream[R, T] = ParallelStream(
     stream = this,
     forge = forge.map(Option.apply),
     maxThreads = maxThreads,
@@ -252,7 +261,7 @@ object Stream {
    * @tparam Return the type of the value
    * @return a new stream that emits the value
    */
-  def emit[Return](value: Return): Stream[Return] = new Stream[Return](Task.pure(List(value).iterator))
+  def emit[Return](value: Return): Stream[Return] = new Stream[Return](Task.pure(Iterator.single(value)))
 
   /**
    * Creates an empty stream.
@@ -260,7 +269,7 @@ object Stream {
    * @tparam Return the type of the values in the stream
    * @return a new empty stream
    */
-  def empty[Return]: Stream[Return] = new Stream[Return](Task.pure(Nil.iterator))
+  def empty[Return]: Stream[Return] = new Stream[Return](Task.pure(Iterator.empty))
 
   /**
    * Creates a stream from a sequence of values.
@@ -269,7 +278,7 @@ object Stream {
    * @tparam Return the type of the values
    * @return a new stream that emits the values in the sequence
    */
-  def emits[Return](seq: Seq[Return]): Stream[Return] = fromIterator[Return](Task(seq.toList.iterator)) // TODO: Figure out why .toList is necessary
+  def emits[Return](seq: Seq[Return]): Stream[Return] = fromIterator[Return](Task(seq.iterator)) // TODO: Figure out why .toList is necessary
 
   /**
    * Creates a stream from an iterator task.
@@ -299,7 +308,7 @@ object Stream {
    * @param file the file to load
    * @return a new stream that emits Bytes
    */
-  def fromFile(file: File): Stream[Byte] = fromInputStream(Task(new FileInputStream(file)))
+  def fromFile(file: File): Stream[Byte] = fromInputStream(Task(new BufferedInputStream(new FileInputStream(file))))
 
   /**
    * Creates a Byte stream from the InputStream task

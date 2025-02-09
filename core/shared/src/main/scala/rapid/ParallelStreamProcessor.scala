@@ -1,6 +1,7 @@
 package rapid
 
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ConcurrentLinkedQueue
 import scala.annotation.tailrec
 
 case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
@@ -8,8 +9,8 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
                                          complete: Int => Unit) {
   private val iteratorTask: Task[Iterator[T]] = Stream.task(stream.stream)
 
-  private val queue = new LockFreeQueue[(T, Int)](stream.maxBuffer)
-  private val ready = new LockFreeQueue[Option[R]](stream.maxBuffer)
+  private val workQueue = new BoundedMPMCQueue[(T, Int)](stream.maxBuffer)
+  private val readyQueue = new ConcurrentLinkedQueue[(Int, Option[R])]()
 
   @volatile private var _total = -1
 
@@ -17,7 +18,7 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
   iteratorTask.map { iterator =>
     var counter = 0
     iterator.zipWithIndex.foreach { tuple =>
-      while (!queue.enqueue(tuple)) {
+      while (!workQueue.enqueue(tuple)) {
         Thread.`yield`()
       }
       counter += 1
@@ -25,62 +26,74 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
     _total = counter
   }.start()
 
+
+  private val processedCount = new AtomicInteger(0)
+
   // Process the queue and feed into ready
   {
-    val counter = new AtomicInteger(0)
-
     @tailrec
-    def recurse(): Unit = {
-      val next = queue.dequeue()
-      next.foreach {
-        case (t, index) =>
-          val r = stream.forge(t).sync()
-          while (counter.get() != index) {
-            Thread.`yield`()
-          }
-          while (!ready.enqueue(r)) {
-            Thread.`yield`()
-          }
-          counter.incrementAndGet()
+    def processLoop(): Unit = {
+      val next = workQueue.dequeue()
+      next.foreach { case (t, index) =>
+        // Process the work item.
+        val result: Option[R] = stream.forge(t).sync()
+        // Enqueue the result into the unbounded ready queue.
+        readyQueue.offer((index, result))
+        processedCount.incrementAndGet()
       }
-      if (next.isEmpty && _total != -1) {
-        // Finished
+      if (_total != -1 && processedCount.get() >= _total) {
+        // All work processed; exit.
       } else {
-        recurse()
+        Thread.`yield`()
+        processLoop()
       }
     }
-
-    // Start a Fiber up to maxThreads
-    (0 until stream.maxThreads).toList.map { _ =>
-      Task(recurse()).handleError { throwable =>
-        throwable.printStackTrace()
-        throw throwable
-      }.start()
+    // Start several processing fibers (up to maxThreads).
+    (0 until stream.maxThreads).foreach { _ =>
+      Task(processLoop())
+        .handleError { throwable =>
+          throwable.printStackTrace()
+          throw throwable
+        }
+        .start()
     }
   }
 
   def total: Option[Int] = if (_total == -1) None else Some(_total)
 
-  // Processes through the ready queue feeding to handle and finally complete
-  Task(handleNext(0, 0)).start()
+  private def dequeueReady(): Opt[(Int, Option[R])] = {
+    val item = readyQueue.poll()
+    if (item != null) Opt.Value(item) else Opt.Empty
+  }
+
+  Task(handleNext(expected = 0, valueCounter = 0)).start()
 
   @tailrec
-  private def handleNext(counter: Int, valueCounter: Int): Unit = {
-    val next = ready.dequeue()
-    if (_total == counter) {
+  private def handleNext(expected: Int, valueCounter: Int,
+                         buffer: Map[Int, Option[R]] = Map.empty): Unit = {
+    // When we know the total number of work items and have handled them all, finish.
+    if (_total != -1 && expected >= _total) {
       complete(valueCounter)
     } else {
-      val (c, vc) = next match {
-        case Opt.Value(value) => value match {
-          case Some(v) =>
-            handle(v)
-            counter + 1 -> (valueCounter + 1)
-          case None =>
-            counter + 1 -> valueCounter
-        }
-        case Opt.Empty => counter -> valueCounter
+      val (updatedBuffer, gotNew) = dequeueReady() match {
+        case Opt.Value((idx, res)) => (buffer + (idx -> res), true)
+        case Opt.Empty             => (buffer, false)
       }
-      handleNext(c, vc)
+      updatedBuffer.get(expected) match {
+        case Some(result) =>
+          // Process the result for the expected index.
+          result match {
+            case Some(v) => handle(v)
+            case None    => // If result is None, nothing to handle.
+          }
+          // Remove the processed item and move on to the next expected index.
+          val newBuffer = updatedBuffer - expected
+          handleNext(expected + 1, valueCounter + 1, newBuffer)
+        case None =>
+          // If no new item for the expected index was dequeued, yield a bit and try again.
+          if (!gotNew) Thread.`yield`()
+          handleNext(expected, valueCounter, updatedBuffer)
+      }
     }
   }
 }
