@@ -74,5 +74,10 @@ class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val list: List[Task[String]] = Nil
       list.tasksPar.map(list => list should be(Nil)).sync()
     }
+    "handle repeat functionality" in {
+      var counter = 0
+      Task(counter += 1).repeat(Repeat.Times(5)).sync()
+      counter should be(5)
+    }
   }
 }

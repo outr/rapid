@@ -6,7 +6,7 @@ import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.tailrec
 import scala.collection.BuildFrom
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
 
@@ -220,9 +220,31 @@ trait Task[+Return] extends Any {
    * @param duration the duration to sleep
    * @return a new task that sleeps for the given duration after the existing task completes
    */
-  def sleep(duration: FiniteDuration): Task[Return] = flatTap { r =>
-    Task(Thread.sleep(duration.toMillis))
+  def sleep(duration: => FiniteDuration): Task[Return] = flatTap { r =>
+    val millis = duration.toMillis
+    if (millis > 0L) {
+      Task(Thread.sleep(millis))
+    } else {
+      Task.unit
+    }
   }
+
+  /**
+   * Convenience functionality wrapping sleep to delay until the timeStamp (in millis).
+   *
+   * @param timeStamp milliseconds since epoch when this should complete
+   */
+  def schedule(timeStamp: => Long): Task[Return] = sleep {
+    val delay = timeStamp - System.currentTimeMillis()
+    delay.millis
+  }
+
+  /**
+   * Convenience functionality for repeated execution.
+   *
+   * @param repeat the Repeat implementation to use
+   */
+  def repeat[R >: Return](repeat: Repeat[R]): Task[R] = repeat(this)
 
   /**
    * Effect to get the current time in milliseconds
