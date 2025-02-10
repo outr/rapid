@@ -22,56 +22,57 @@ trait Task[+Return] extends Any {
    * @return the result of the task
    */
   def sync(): Return = {
-    var previous: Any = ()
-    var list: List[Any] = List(this)
+    val stack = new java.util.ArrayDeque[Any]()
+    stack.push(this)
 
-    @tailrec
-    def recurse(): Return = {
-      list match {
-        case Nil => previous.asInstanceOf[Return]
-        case head :: tail =>
-          list = tail
+    var previous: Any = ()
+
+    while (!stack.isEmpty) {
+      val head = stack.pop()
+
+      Task.monitor.foreach { m =>
+        head match {
+          case t: Task[_] => m.start(t)
+          case _ => // Ignore Forge
+        }
+      }
+
+      try {
+        head match {
+          case _: UnitTask => previous = ()
+          case PureTask(value) => previous = value
+          case SingleTask(f) => previous = f()
+          case t: Taskable[_] => previous = t.toTask.sync()
+          case ErrorTask(throwable) => throw throwable
+          case c: CompletableTask[_] => previous = c.sync()
+          case f: Fiber[_] => previous = f.sync()
+          case f: Forge[_, _] =>
+            stack.push(f.asInstanceOf[Forge[Any, Any]](previous))
+          case FlatMapTask(source, forge) =>
+            stack.push(forge)  // Push forge first so that source executes first
+            stack.push(source)
+          case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
+        }
+
+        Task.monitor.foreach { m =>
+          head match {
+            case t: Task[_] => m.success(t, previous)
+            case _ => // Ignore Forge
+          }
+        }
+      } catch {
+        case throwable: Throwable =>
           Task.monitor.foreach { m =>
             head match {
-              case t: Task[_] => m.start(t)
+              case t: Task[_] => m.error(t, throwable)
               case _ => // Ignore Forge
             }
           }
-          try {
-            head match {
-              case _: UnitTask => previous = ()
-              case PureTask(value) => previous = value
-              case SingleTask(f) => previous = f()
-              case t: Taskable[_] => previous = t.toTask.sync()
-              case ErrorTask(throwable) => throw throwable
-              case c: CompletableTask[_] => previous = c.sync()
-              case f: Fiber[_] => previous = f.sync()
-              case f: Forge[_, _] =>
-                list = f.asInstanceOf[Forge[Any, Any]](previous) :: list
-              case FlatMapTask(source, forge) =>
-                list = source :: forge :: list
-              case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
-            }
-            Task.monitor.foreach { m =>
-              head match {
-                case t: Task[_] => m.success(t, previous)
-                case _ => // Ignore Forge
-              }
-            }
-          } catch {
-            case throwable: Throwable =>
-              Task.monitor.foreach { m =>
-                head match {
-                  case t: Task[_] => m.error(t, throwable)
-                  case _ => // Ignore Forge
-                }
-              }
-              throw throwable
-          }
-          recurse()
+          throw throwable
       }
     }
-    recurse()
+
+    previous.asInstanceOf[Return]
   }
 
   /**
@@ -148,7 +149,12 @@ trait Task[+Return] extends Any {
    * @tparam T the type of the transformed result
    * @return a new task with the transformed result
    */
-  def map[T](f: Return => T): Task[T] = flatMap(r => Task(f(r)))
+  def map[T](f: Return => T): Task[T] = this match {
+    case PureTask(value) => PureTask(f(value))  // Directly apply transformation
+    case SingleTask(g) => SingleTask(() => f(g()))  // Apply transformation inline
+    case _ => FlatMapTask(this, Forge[Return, T](i => Task(f(i))))
+  }
+
 
   /**
    * Transforms this task to a pure result.
@@ -190,10 +196,9 @@ trait Task[+Return] extends Any {
    * @tparam T the type of the result of the new task
    * @return a new task with the transformed result
    */
-  def flatMap[T](f: Return => Task[T]): Task[T] = {
-    val t = FlatMapTask(this, Forge(f))
-    Task.monitor.foreach(_.created(t))
-    t
+  def flatMap[T](f: Return => Task[T]): Task[T] = this match {
+    case PureTask(value) => f(value)  // Direct execution for pure values
+    case _ => FlatMapTask(this, Forge(f))
   }
 
   /**

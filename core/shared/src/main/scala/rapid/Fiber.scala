@@ -15,17 +15,17 @@ trait Fiber[+Return] extends Task[Return] {
 
   override def await(): Return = sync()
 
-  override def toString: String = "Fiber"
+  override def toString: String = s"Fiber(${getClass.getSimpleName})"
 }
 
 object Fiber {
   @nowarn()
-  def fromFuture[Return](future: Future[Return]): Fiber[Return] = {
+  def fromFuture[Return](future: Future[Return])(implicit ec: scala.concurrent.ExecutionContext): Fiber[Return] = {
     val completable = Task.completable[Return]
     future.onComplete {
       case Success(value) => completable.success(value)
       case Failure(exception) => completable.failure(exception)
-    }(scala.concurrent.ExecutionContext.Implicits.global)
+    }
     completable.start()
   }
 
