@@ -8,6 +8,7 @@ import rapid._
 
 import java.io.File
 import java.nio.file.Files
+import scala.concurrent.duration.DurationInt
 
 class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
@@ -92,6 +93,25 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
           |multiple
           |lines""".stripMargin.getBytes("UTF-8").toIndexedSeq)
       stream.lines.toList.sync() should be(List("This", "is", "multiple", "lines"))
+    }
+    "verify stream merging works and lazily builds" in {
+      val s1 = Stream(1, 2, 3)
+      val s2 = Stream.force(Task.sleep(1.second).map(_ => Stream(4, 5, 6)))
+      var set = Set.empty[Int]
+      val merged = Stream.merge(Task(List(s1, s2).iterator)).foreach { i =>
+        set += i
+      }
+      set should be(Set.empty)
+      val start = System.currentTimeMillis()
+      val fiber = merged.drain.start()
+      Task.sleep(10.milliseconds).flatMap { _ =>
+        set should be(Set(1, 2, 3))
+        fiber.map { _ =>
+          set should be(Set(1, 2, 3, 4, 5, 6))
+          val elapsed = System.currentTimeMillis() - start
+          elapsed should be > 1000L
+        }
+      }.sync()
     }
   }
 }

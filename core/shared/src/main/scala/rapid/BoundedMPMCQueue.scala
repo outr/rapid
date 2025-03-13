@@ -36,7 +36,7 @@ final class BoundedMPMCQueue[A](capacity: Int) {
    *
    * @param item the element to enqueue; must not be null.
    * @return true if the element was enqueued, or false if the queue is full.
-   * @throws NullPointerException if item is null.
+   * @throws java.lang.NullPointerException if item is null.
    */
   def enqueue(item: A): Boolean = {
     if (item == null)

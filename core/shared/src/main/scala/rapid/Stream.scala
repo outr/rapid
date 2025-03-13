@@ -295,6 +295,15 @@ object Stream {
   def force[Return](stream: Task[Stream[Return]]): Stream[Return] = new Stream[Return](stream.flatMap(_.task))
 
   /**
+   * Merges an Iterator of Streams together into one lazily loading Stream
+   */
+  def merge[Return](streams: Task[Iterator[Stream[Return]]]): Stream[Return] = force(streams.map { iterator =>
+    new Stream(Task {
+      iterator.flatMap(_.task.sync())
+    })
+  })
+
+  /**
    * Creates a Byte stream from the NIO Path
    *
    * @param path the path to the file
