@@ -51,7 +51,7 @@ val scribeVersion: String = "3.16.0"
 
 /// Testing and Benchmarking Libraries
 
-val catsVersion: String = "3.5.7"
+val catsVersion: String = "3.6.0"
 
 val fs2Version: String = "3.11.0"
 
