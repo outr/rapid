@@ -53,7 +53,7 @@ val scribeVersion: String = "3.16.0"
 
 val catsVersion: String = "3.5.7"
 
-val fs2Version: String = "3.11.0"
+val fs2Version: String = "3.12.0"
 
 val scalaJsMacrotaskVersion: String = "1.1.1"
 
