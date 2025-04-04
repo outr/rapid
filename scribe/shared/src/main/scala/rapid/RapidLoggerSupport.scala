@@ -5,7 +5,7 @@ import scribe.{Level, LogFeature, LogRecord, Logger, LoggerSupport}
 import sourcecode.{FileName, Line, Name, Pkg}
 
 trait RapidLoggerSupport extends Any with LoggerSupport[Task[Unit]] {
-  override def log(record: LogRecord): Task[Unit] = Task(Logger(record.className)
+  override def log(record: => LogRecord): Task[Unit] = Task(Logger(record.className)
     .log(record.copy(timeStamp = System.currentTimeMillis())))
 
   override def log(level: Level, mdc: MDC, features: LogFeature*)
