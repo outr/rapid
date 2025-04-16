@@ -213,6 +213,29 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   }
 
   /**
+   * Reduces the elements of this stream using the given binary operator,
+   * starting with the first element as the initial value and combining
+   * sequentially with the rest.
+   *
+   * This is similar to `reduceLeft` on standard collections, but supports
+   * effectful computation via `Task`. If the stream is empty, the returned
+   * `Task` will fail with a `NoSuchElementException`.
+   *
+   * @param f the effectful binary operator to apply between elements
+   * @tparam T the result type, which must be a supertype of `Return`
+   * @return a `Task` producing the reduced value of the stream
+   * @throws NoSuchElementException if the stream is empty
+   */
+  def reduce[T >: Return](f: (T, T) => Task[T]): Task[T] = Task {
+    val it = task.sync()
+    var result: T = it.next()
+    while (it.hasNext) {
+      result = f(result, it.next()).sync()
+    }
+    result
+  }
+
+  /**
    * Grabs only the first result from the stream.
    */
   def first: Task[Return] = take(1).last
