@@ -2,21 +2,68 @@ package rapid
 
 import java.io.{BufferedInputStream, File, FileInputStream, InputStream}
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
+import scala.annotation.tailrec
+import scala.collection.mutable.ListBuffer
 import scala.io.Source
 
 /**
- * Represents a pull-based stream of values of type `Return`.
+ * A lazy, pull-based stream abstraction for processing elements with full support for concurrency and composability.
  *
- * @tparam Return the type of the values produced by this stream
+ * @tparam Return the type of the elements emitted by this stream
  */
-class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
+class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
+  def transform[T](f: Return => Step[T]): Stream[T] =
+    new Stream[T](task.map { outer =>
+      val done = new AtomicBoolean(false)
+      var current: Option[Pull[T]] = None
+
+      () => {
+        if (done.get()) None
+        else {
+          @annotation.tailrec
+          def loop(): Option[T] = current match {
+            case Some(inner) =>
+              inner.pull() match {
+                case some@Some(_) => some
+                case None =>
+                  current = None
+                  loop()
+              }
+
+            case None =>
+              outer.pull() match {
+                case Some(a) =>
+                  val stepRes = f(a)
+                  stepRes match {
+                    case e: Step.Emit[_] => Some(e.value.asInstanceOf[T])
+                    case Step.Skip => loop()
+                    case Step.Stop =>
+                      done.set(true)
+                      None
+                    case c: Step.Concat[_] =>
+                      current = Some(c.pull.asInstanceOf[Pull[T]])
+                      loop()
+                  }
+                case None =>
+                  done.set(true)
+                  None
+              }
+          }
+
+          loop()
+        }
+      }
+    })
+
   /**
    * Filters the values in the stream using the given predicate.
    *
    * @param p the predicate to test the values
    * @return a new stream with the values that satisfy the predicate
    */
-  def filter(p: Return => Boolean): Stream[Return] = new Stream(task.map(_.filter(p)))
+  def filter(p: Return => Boolean): Stream[Return] = transform(r => if (p(r)) Step.Emit(r) else Step.Skip)
 
   def filterNot(p: Return => Boolean): Stream[Return] = filter(r => !p(r))
 
@@ -26,23 +73,29 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @param f the partial function to apply
    * @tparam T the new return type
    */
-  def collect[T](f: PartialFunction[Return, T]): Stream[T] = new Stream(task.map { iterator =>
-    iterator.collect(f)
-  })
+  def collect[T](f: PartialFunction[Return, T]): Stream[T] = transform { r =>
+    f.lift(r).map(r => Step.Emit(r)).getOrElse(Step.Skip)
+  }
 
   /**
    * Takes values from the stream while the given predicate holds.
    *
    * @param p the predicate to test the values
    */
-  def takeWhile(p: Return => Boolean): Stream[Return] = new Stream(task.map(_.takeWhile(p)))
+  def takeWhile(p: Return => Boolean): Stream[Return] = transform(a => if (p(a)) Step.Emit(a) else Step.Stop)
 
   /**
    * Takes n values from the stream and disregards the rest.
    *
    * @param n the number of values to take from the stream
    */
-  def take(n: Int): Stream[Return] = new Stream(task.map(_.take(n)))
+  def take(n: Int): Stream[Return] = {
+    val counter = new AtomicInteger(0)
+    transform { a =>
+      if (counter.getAndIncrement() < n) Step.Emit(a)
+      else Step.Stop
+    }
+  }
 
   /**
    * Transforms the values in the stream using the given function.
@@ -51,7 +104,7 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @tparam T the type of the transformed values
    * @return a new stream with the transformed values
    */
-  def map[T](f: Return => T): Stream[T] = new Stream(task.map(_.map(f)))
+  def map[T](f: Return => T): Stream[T] = transform(r => Step.Emit(f(r)))
 
   /**
    * Similar to map, but doesn't change the result. Allows doing something with each value without changing the result.
@@ -67,9 +120,10 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   /**
    * Transforms the values in the stream to include the index of the value within the stream
    */
-  def zipWithIndex: Stream[(Return, Int)] = new Stream(task.map { iterator =>
-    iterator.zipWithIndex
-  })
+  def zipWithIndex: Stream[(Return, Int)] = {
+    val counter = new AtomicInteger(0)
+    transform(r => Step.Emit((r, counter.getAndIncrement())))
+  }
 
   /**
    * Transforms the values in the stream using the given function that returns a new stream.
@@ -78,9 +132,8 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @tparam T the type of the values in the new streams
    * @return a new stream with the transformed values
    */
-  def flatMap[T](f: Return => Stream[T]): Stream[T] = new Stream(task.map { iterator =>
-    iterator.flatMap(r => f(r).task.sync())
-  })
+  def flatMap[T](f: Return => Stream[T]): Stream[T] =
+    transform(r => Step.Concat(f(r).task.sync()))
 
   /**
    * Transforms the values in the stream using the given function that returns a task.
@@ -89,13 +142,9 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @tparam T the type of the values in the tasks
    * @return a new stream with the transformed values
    */
-  def evalMap[T](f: Return => Task[T]): Stream[T] = new Stream(task.map { iterator =>
-    iterator.map(f).map(_.sync())
-  })
+  def evalMap[T](f: Return => Task[T]): Stream[T] = transform(r => Step.Emit(f(r).sync()))
 
-  def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] = new Stream(task.map { iterator =>
-    iterator.map(r => forge(r)).map(_.sync())
-  })
+  def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] = transform(r => Step.Emit(forge(r).sync()))
 
   /**
    * Similar to evalMap, but doesn't change the result. Allows doing something with each value without changing the
@@ -114,24 +163,41 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @param chunkSize the maximum size of each chunk
    * @return a new stream where each element is a vector of `Return` values
    */
-  def chunk(chunkSize: Int = 1024): Stream[Vector[Return]] = new Stream(task.map { i =>
-    new Iterator[Vector[Return]] {
-      override def hasNext: Boolean = i.hasNext
+  def chunk(chunkSize: Int = 1024): Stream[Vector[Return]] =
+    new Stream(task.map { pullR =>
+      new Pull[Vector[Return]] {
+        private val done = new AtomicBoolean(false)
 
-      override def next(): Vector[Return] = {
-        if (!hasNext) throw new NoSuchElementException("no more chunks")
+        override def pull(): Option[Vector[Return]] = {
+          if (done.get()) {
+            None
+          } else {
+            val buf = Vector.newBuilder[Return]
+            var i   = 0
 
-        val buffer = new scala.collection.mutable.ArrayBuffer[Return](chunkSize)
-        var count = 0
-        while (count < chunkSize && i.hasNext) {
-          buffer += i.next()
-          count += 1
+            while (i < chunkSize) {
+              pullR.pull() match {
+                case Some(r) =>
+                  buf += r
+                  i += 1
+
+                case None =>
+                  // no more elements → mark done and break
+                  done.set(true)
+                  i = chunkSize
+              }
+            }
+
+            val v = buf.result()
+            if (v.isEmpty) {
+              None
+            } else {
+              Some(v)
+            }
+          }
         }
-
-        buffer.toVector
       }
-    }
-  })
+    })
 
   /**
    * Creates a grouping Stream expecting the group delineation is the natural sort order of the results.
@@ -139,18 +205,249 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @param grouper the grouping function
    * @tparam G the group key
    */
-  def groupSequential[G, R >: Return](grouper: R => G): Stream[Grouped[G, R]] = new Stream(task.map { iterator =>
-    GroupedIterator(iterator, grouper)
-  })
+  def groupSequential[G, R >: Return](grouper: R => G): Stream[Grouped[G, R]] =
+    new Stream(task.map { pullR =>
+      new Pull[Grouped[G, R]] {
+        private val done = new AtomicBoolean(false)
+        private val nextElem = new AtomicReference[Option[R]](None)
+
+        override def pull(): Option[Grouped[G, R]] = {
+          if (done.get()) {
+            None
+          } else {
+            // first item: either the pushed‑back one, or a fresh pull
+            val firstOpt = nextElem.getAndSet(None) match {
+              case some @ Some(_) => some
+              case None           => pullR.pull()
+            }
+
+            firstOpt match {
+              case None =>
+                done.set(true)
+                None
+
+              case Some(first) =>
+                val groupKey = grouper(first)
+                val buf = ListBuffer[R]()
+                buf += first
+
+                // consume until the key changes or we run out
+                var next = pullR.pull()
+                while (next.isDefined && grouper(next.get) == groupKey) {
+                  buf += next.get
+                  next = pullR.pull()
+                }
+
+                // if we saw an element from the next group, stash it
+                if (next.isDefined) {
+                  nextElem.set(next)
+                } else {
+                  done.set(true)
+                }
+
+                Some(Grouped(groupKey, buf.toList))
+            }
+          }
+        }
+      }
+    })
 
   /**
    * Groups at a separator
    *
    * @param separator returns true if this entry represents a separator
    */
-  def group(separator: Return => Boolean): Stream[List[Return]] = new Stream(task.map { iterator =>
-    new GroupingIterator[Return](iterator, separator)
-  })
+  def group(separator: Return => Boolean): Stream[List[Return]] =
+    new Stream(task.map { pullR =>
+      new Pull[List[Return]] {
+        private val done = new AtomicBoolean(false)
+
+        override def pull(): Option[List[Return]] = {
+          if (done.get()) {
+            None
+          } else {
+            // buffer one group
+            val buf = ListBuffer[Return]()
+            var boundaryReached = false
+
+            while (!boundaryReached) {
+              pullR.pull() match {
+                case Some(r) if !separator(r) =>
+                  buf += r
+                case Some(_) =>
+                  // hit a separator, end this group
+                  boundaryReached = true
+                case None =>
+                  // end of stream: mark done and stop grouping
+                  done.set(true)
+                  boundaryReached = true
+              }
+            }
+
+            if (buf.isEmpty) {
+              // we either saw only separators or hit end‑of‑stream immediately
+              // if there's more to do, skip empty and try again
+              if (done.get()) None else pull()
+            } else {
+              Some(buf.toList)
+            }
+          }
+        }
+      }
+    })
+
+  def drop(n: Int): Stream[Return] = {
+    val counter = new AtomicInteger(0)
+    transform { r =>
+      if (counter.getAndIncrement() < n) Step.Skip else Step.Emit(r)
+    }
+  }
+
+  def dropWhile(p: Return => Boolean): Stream[Return] = {
+    val dropping = new AtomicBoolean(true)
+    transform { r =>
+      if (dropping.get()) {
+        if (p(r)) Step.Skip else {
+          dropping.set(false)
+          Step.Emit(r)
+        }
+      } else Step.Emit(r)
+    }
+  }
+
+  def slice(from: Int, until: Int): Stream[Return] = {
+    val index = new AtomicInteger(0)
+    transform { r =>
+      val i = index.getAndIncrement()
+      if (i >= from && i < until) Step.Emit(r)
+      else if (i >= until) Step.Stop
+      else Step.Skip
+    }
+  }
+
+  def sliding(size: Int, step: Int = 1): Stream[Vector[Return]] = {
+    require(size > 0 && step > 0)
+    new Stream(task.map { pullR =>
+      val buffer = new scala.collection.mutable.Queue[Return]()
+      val done = new AtomicBoolean(false)
+
+      new Pull[Vector[Return]] {
+        override def pull(): Option[Vector[Return]] = {
+          if (done.get()) None
+          else {
+            while (buffer.size < size) {
+              pullR.pull() match {
+                case Some(r) => buffer.enqueue(r)
+                case None =>
+                  done.set(true)
+                  if (buffer.nonEmpty) {
+                    val out = buffer.toVector
+                    buffer.clear()
+                    return Some(out)
+                  } else return None
+              }
+            }
+            val out = buffer.take(size).toVector
+            for (_ <- 0 until step if buffer.nonEmpty) buffer.dequeue()
+            Some(out)
+          }
+        }
+      }
+    })
+  }
+
+  def find(p: Return => Boolean): Task[Option[Return]] = {
+    task.map { pullR =>
+      @tailrec def loop(): Option[Return] = pullR.pull() match {
+        case Some(r) if p(r) => Some(r)
+        case Some(_) => loop()
+        case None => None
+      }
+      loop()
+    }
+  }
+
+  def exists(p: Return => Boolean): Task[Boolean] = find(p).map(_.isDefined)
+
+  def forall(p: Return => Boolean): Task[Boolean] =
+    task.map { pullR =>
+      @tailrec def loop(): Boolean = pullR.pull() match {
+        case Some(r) if p(r) => loop()
+        case Some(_) => false
+        case None => true
+      }
+      loop()
+    }
+
+  def contains[T >: Return](elem: T): Task[Boolean] = exists(_ == elem)
+
+  def scanLeft[T](initial: T)(f: (T, Return) => T): Stream[T] = {
+    val acc = new AtomicReference[T](initial)
+    transform { r =>
+      val updated = f(acc.get(), r)
+      acc.set(updated)
+      Step.Emit(updated)
+    }
+  }
+
+  def distinct: Stream[Return] = {
+    val seen = scala.collection.concurrent.TrieMap.empty[Return, Unit]
+    filter { r => seen.putIfAbsent(r, ()).isEmpty }
+  }
+
+  def intersperse[T >: Return](separator: T): Stream[T] = {
+    val first = new AtomicBoolean(true)
+    transform { r =>
+      if (first.getAndSet(false)) Step.Emit(r)
+      else Step.Concat(Pull.fromList(List(separator, r)))
+    }
+  }
+
+  def zip[T2](other: Stream[T2]): Stream[(Return, T2)] = {
+    val zipped = task.flatMap { pullA =>
+      other.task.map { pullB =>
+        new Pull[(Return, T2)] {
+          override def pull(): Option[(Return, T2)] =
+            for {
+              a <- pullA.pull()
+              b <- pullB.pull()
+            } yield (a, b)
+        }
+      }
+    }
+    new Stream(zipped)
+  }
+
+  def zipAll[T2, T >: Return](other: Stream[T2], thisElem: T, otherElem: T2): Stream[(T, T2)] = {
+    val zipped = task.flatMap { pullA =>
+      other.task.map { pullB =>
+        new Pull[(T, T2)] {
+          override def pull(): Option[(T, T2)] = {
+            val a = pullA.pull().getOrElse(thisElem)
+            val b = pullB.pull().getOrElse(otherElem)
+            if (a == thisElem && b == otherElem) None else Some((a, b))
+          }
+        }
+      }
+    }
+    new Stream(zipped)
+  }
+
+  def zipWith[T2, R](other: Stream[T2])(f: (Return, T2) => R): Stream[R] = {
+    zip(other).map { case (a, b) => f(a, b) }
+  }
+
+  def partition(p: Return => Boolean): (Stream[Return], Stream[Return]) = {
+    val left  = this.filter(p)
+    val right = this.filterNot(p)
+    (left, right)
+  }
+
+  def groupBy[K](f: Return => K): Task[Map[K, List[Return]]] =
+    fold(Map.empty[K, List[Return]]) { (acc, r) =>
+      val k = f(r)
+      Task.pure(acc.updated(k, r :: acc.getOrElse(k, Nil)))
+    }.map(_.view.mapValues(_.reverse).toMap)
 
   /**
    * Appends another stream to this stream.
@@ -159,11 +456,14 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @tparam T the type of the values in the appended stream
    * @return a new stream with the values from both streams
    */
-  def append[T >: Return](that: => Stream[T]): Stream[T] = new Stream(Task {
-    val iterator1 = task.sync()
-    val iterator2 = that.task.sync()
-    iterator1 ++ iterator2
-  })
+  def append[T >: Return](that: => Stream[T]): Stream[T] =
+    new Stream[T](
+      task.flatMap { pullR =>
+        that.task.map { pullT =>
+          () => pullR.pull().orElse(pullT.pull())
+        }
+      }
+    )
 
   /**
    * Appends another stream to this stream.
@@ -177,23 +477,20 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
   /**
    * Drains the stream and fully evaluates it.
    */
-  def drain: Task[Unit] = Task {
-    val it = task.sync()
-    while (it.hasNext) it.next()
-    ()
-  }
+  def drain: Task[Unit] = fold(())((_, _) => Task(()))
 
   /**
    * Cycles through all results but only returns the last element. Will error if the Stream is empty.
    */
-  def last: Task[Return] = task.map(_.reduce((_, b) => b))
+  def last: Task[Return] = lastOption.flatMap {
+    case Some(r) => Task(r)
+    case None => Task.error(new NoSuchElementException("Stream.last on empty stream"))
+  }
 
   /**
    * Cycles through all results but only returns the last element or None if the stream is empty.
    */
-  def lastOption: Task[Option[Return]] = task.map { iterator =>
-    iterator.reduceOption((_, b) => b)
-  }
+  def lastOption: Task[Option[Return]] = fold(Option.empty[Return])((_, r) => Task(Some(r)))
 
   /**
    * Folds through the stream returning the last value
@@ -203,14 +500,16 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @tparam T the resulting type
    * @return Task[T]
    */
-  def fold[T](initial: T)(f: (T, Return) => Task[T]): Task[T] = Task {
-    var result = initial
-    val it = task.sync()
-    while (it.hasNext) {
-      result = f(result, it.next()).sync()
+  def fold[T](initial: T)(f: (T, Return) => Task[T]): Task[T] =
+    task.map { pullR =>
+      var acc = initial
+      var next = pullR.pull()
+      while (next.isDefined) {
+        acc = f(acc, next.get).sync()
+        next = pullR.pull()
+      }
+      acc
     }
-    result
-  }
 
   /**
    * Reduces the elements of this stream using the given binary operator,
@@ -226,38 +525,44 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
    * @return a `Task` producing the reduced value of the stream
    * @throws NoSuchElementException if the stream is empty
    */
-  def reduce[T >: Return](f: (T, T) => Task[T]): Task[T] = Task {
-    val it = task.sync()
-    var result: T = it.next()
-    while (it.hasNext) {
-      result = f(result, it.next()).sync()
+  def reduce[T >: Return](f: (T, T) => Task[T]): Task[T] = fold[Option[T]](None) { (optAcc, r) =>
+    Task.defer {
+      optAcc match {
+        case Some(acc) => f(acc, r).map(Some(_))
+        case None => Task.pure(Some(r))
+      }
     }
-    result
+  }.flatMap {
+    case Some(result) => Task.pure(result)
+    case None => Task.error(new NoSuchElementException("Stream.reduce on empty stream"))
   }
 
   /**
    * Grabs only the first result from the stream.
    */
-  def first: Task[Return] = take(1).last
+  def first: Task[Return] = firstOption.flatMap {
+    case Some(r) => Task(r)
+    case None => Task.error(new NoSuchElementException("Stream.first on empty stream"))
+  }
 
   /**
    * Grabs only the first element or None if the stream is empty.
    */
-  def firstOption: Task[Option[Return]] = take(1).lastOption
+  def firstOption: Task[Option[Return]] = task.map(_.pull())
 
   /**
    * Converts the stream to a list.
    *
    * @return a task that produces a list of the values in the stream
    */
-  def toList: Task[List[Return]] = task.map(_.toList)
+  def toList: Task[List[Return]] = fold(Vector.empty[Return]) { (vec, r) => Task(vec :+ r) }.map(_.toList)
 
   /**
    * Counts the number of elements in the stream and fully evaluates it.
    *
    * @return a `Task[Int]` representing the total number of entries evaluated
    */
-  def count: Task[Int] = task.map(_.size)
+  def count: Task[Int] = fold(0)((cnt, _) => Task(cnt + 1))
 
   def par[T, R >: Return](maxThreads: Int = ParallelStream.DefaultMaxThreads,
                           maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
@@ -270,6 +575,11 @@ class Stream[+Return](private val task: Task[Iterator[Return]]) extends AnyVal {
 }
 
 object Stream {
+  /**
+   * Creates a stream with a Pull task
+   */
+  def apply[Return](pull: Task[Pull[Return]]): Stream[Return] = new Stream(pull)
+
   /**
    * Creates a stream with a variable number of entries
    *
@@ -284,7 +594,7 @@ object Stream {
    * @tparam Return the type of the value
    * @return a new stream that emits the value
    */
-  def emit[Return](value: Return): Stream[Return] = new Stream[Return](Task.pure(Iterator.single(value)))
+  def emit[Return](value: Return): Stream[Return] = apply(Task(Pull.fromList(List(value))))
 
   /**
    * Creates an empty stream.
@@ -292,7 +602,7 @@ object Stream {
    * @tparam Return the type of the values in the stream
    * @return a new empty stream
    */
-  def empty[Return]: Stream[Return] = new Stream[Return](Task.pure(Iterator.empty))
+  def empty[Return]: Stream[Return] = apply()
 
   /**
    * Creates a stream from a sequence of values.
@@ -301,7 +611,7 @@ object Stream {
    * @tparam Return the type of the values
    * @return a new stream that emits the values in the sequence
    */
-  def emits[Return](seq: Seq[Return]): Stream[Return] = fromIterator[Return](Task(seq.iterator)) // TODO: Figure out why .toList is necessary
+  def emits[Return](seq: Seq[Return]): Stream[Return] = new Stream(Task(Pull.fromSeq(seq)))
 
   /**
    * Creates a stream from an iterator task.
@@ -310,7 +620,7 @@ object Stream {
    * @tparam Return the type of the values
    * @return a new stream that emits the values in the iterator
    */
-  def fromIterator[Return](iterator: Task[Iterator[Return]]): Stream[Return] = new Stream[Return](iterator)
+  def fromIterator[Return](iterator: Task[Iterator[Return]]): Stream[Return] = apply(iterator.map(Pull.fromIterator))
 
   /**
    * Forces a Task[Stream] into Stream
@@ -320,11 +630,39 @@ object Stream {
   /**
    * Merges an Iterator of Streams together into one lazily loading Stream
    */
-  def merge[Return](streams: Task[Iterator[Stream[Return]]]): Stream[Return] = force(streams.map { iterator =>
-    new Stream(Task {
-      iterator.flatMap(_.task.sync())
-    })
-  })
+  def merge[Return](streams: Task[Pull[Stream[Return]]]): Stream[Return] =
+    new Stream[Return](
+      streams.map { outerPull =>
+        val innerQueue = new ConcurrentLinkedQueue[Pull[Return]]()
+
+        () => {
+          @tailrec
+          def loop(): Option[Return] = {
+            val inner = innerQueue.poll()
+            if (inner != null) {
+              inner.pull() match {
+                case some@Some(_) =>
+                  innerQueue.offer(inner)
+                  some
+                case None =>
+                  loop()
+              }
+            } else {
+              outerPull.pull() match {
+                case Some(stream) =>
+                  val p = stream.task.sync()
+                  innerQueue.offer(p)
+                  loop()
+                case None =>
+                  None
+              }
+            }
+          }
+
+          loop()
+        }
+      }
+    )
 
   /**
    * Creates a Byte stream from the NIO Path
@@ -346,31 +684,32 @@ object Stream {
    * Creates a Byte stream from the InputStream task
    *
    * @param input the InputStream task
+   * @param bufferSize the buffer size internally to use for the InputStream. Defaults to 1024.
    * @return a new stream that emits Bytes
    */
-  def fromInputStream(input: Task[InputStream]): Stream[Byte] = new Stream[Byte](input.map { is =>
-    var finished = false
+  def fromInputStream(input: Task[InputStream], bufferSize: Int = 1024): Stream[Byte] =
+    new Stream[Byte](input.map { is =>
+      val lock = new AnyRef
+      val buf = new Array[Byte](bufferSize)
+      var pos = 0
+      var len = 0
 
-    val baseIterator = Iterator.continually(is.read())
-      .takeWhile(_ != -1)
-      .map(_.toByte)
-
-    new Iterator[Byte] {
-      def hasNext: Boolean = {
-        val hasMore = baseIterator.hasNext
-        if (!hasMore && !finished) {
-          finished = true
-          is.close()
+      () => {
+        lock.synchronized {
+          if (pos >= len) {
+            len = is.read(buf)
+            pos = 0
+          }
+          if (len < 0) {
+            None
+          } else {
+            val b = buf(pos)
+            pos += 1
+            Some(b)
+          }
         }
-        hasMore
       }
+    })
 
-      def next(): Byte = {
-        if (!hasNext) throw new NoSuchElementException
-        baseIterator.next()
-      }
-    }
-  })
-
-  def task[Return](stream: Stream[Return]): Task[Iterator[Return]] = stream.task
+  def task[Return](stream: Stream[Return]): Task[Pull[Return]] = stream.task
 }

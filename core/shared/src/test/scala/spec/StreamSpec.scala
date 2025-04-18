@@ -98,7 +98,7 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val s1 = Stream(1, 2, 3)
       val s2 = Stream.force(Task.sleep(1.second).map(_ => Stream(4, 5, 6)))
       var set = Set.empty[Int]
-      val merged = Stream.merge(Task(List(s1, s2).iterator)).foreach { i =>
+      val merged = Stream.merge(Task(Pull.fromList(List(s1, s2)))).foreach { i =>
         set += i
       }
       set should be(Set.empty)
