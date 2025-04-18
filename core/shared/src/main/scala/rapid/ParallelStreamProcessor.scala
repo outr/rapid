@@ -24,8 +24,18 @@ case class ParallelStreamProcessor[T, R](
     def loadNext(): Unit = {
       pull.pull() match {
         case Some(t) =>
+          var backoff = 1
           while (!workQueue.enqueue((t, idx))) {
-            Thread.`yield`()
+            if (backoff < 1000) {
+              // Exponential backoff with a cap
+              backoff *= 2
+              for (_ <- 0 until backoff) {
+                // Busy-wait for a short time
+              }
+            } else {
+              // If we've backed off a lot, yield to other threads
+              Thread.`yield`()
+            }
           }
           idx += 1
           loadNext()
@@ -40,19 +50,37 @@ case class ParallelStreamProcessor[T, R](
 
   // Process the queue and feed into readyQueue
   {
-    @tailrec
     def processLoop(): Unit = {
-      workQueue.dequeue().foreach { case (t, index) =>
-        val result: Option[R] = stream.forge(t).sync()
-        readyQueue.offer((index, result))
-        processedCount.incrementAndGet()
+      var backoff = 1
+
+      @tailrec
+      def loop(): Unit = {
+        workQueue.dequeue().foreach { case (t, index) =>
+          val result: Option[R] = stream.forge(t).sync()
+          readyQueue.offer((index, result))
+          processedCount.incrementAndGet()
+          // Reset backoff on successful dequeue
+          backoff = 1
+        }
+
+        if (_total != -1 && processedCount.get() >= _total) {
+          ()  // done
+        } else {
+          if (backoff < 1000) {
+            // Exponential backoff with a cap
+            backoff *= 2
+            for (_ <- 0 until backoff) {
+              // Busy-wait for a short time
+            }
+          } else {
+            // If we've backed off a lot, yield to other threads
+            Thread.`yield`()
+          }
+          loop()
+        }
       }
-      if (_total != -1 && processedCount.get() >= _total) {
-        ()  // done
-      } else {
-        Thread.`yield`()
-        processLoop()
-      }
+
+      loop()
     }
 
     (0 until stream.maxThreads).foreach { _ =>
@@ -74,12 +102,15 @@ case class ParallelStreamProcessor[T, R](
   }
 
   // Start the final ordering fiber
-  Task(handleNext(expected = 0, valueCounter = 0)).start()
+  Task {
+    var backoff = 1
+    handleNext(expected = 0, valueCounter = 0, backoff = backoff)
+  }.start()
 
-  @tailrec
   private def handleNext(
                           expected: Int,
                           valueCounter: Int,
+                          backoff: Int,
                           buffer: Map[Int, Option[R]] = Map.empty
                         ): Unit = {
     if (_total != -1 && expected >= _total) {
@@ -93,12 +124,27 @@ case class ParallelStreamProcessor[T, R](
         case Some(result) =>
           result.foreach(handle)
           val newBuf = updatedBuffer - expected
-          handleNext(expected + 1, valueCounter + 1, newBuf)
+          // Reset backoff on success
+          handleNext(expected + 1, valueCounter + 1, 1, newBuf)
         case None =>
           if (!gotNew) {
-            Thread.`yield`()
+            val newBackoff = if (backoff < 1000) {
+              // Exponential backoff with a cap
+              val b = backoff * 2
+              for (_ <- 0 until b) {
+                // Busy-wait for a short time
+              }
+              b
+            } else {
+              // If we've backed off a lot, yield to other threads
+              Thread.`yield`()
+              backoff
+            }
+            handleNext(expected, valueCounter, newBackoff, updatedBuffer)
+          } else {
+            // Reset backoff if we got new data
+            handleNext(expected, valueCounter, 1, updatedBuffer)
           }
-          handleNext(expected, valueCounter, updatedBuffer)
       }
     }
   }

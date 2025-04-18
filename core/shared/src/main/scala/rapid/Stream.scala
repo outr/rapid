@@ -63,7 +63,23 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @param p the predicate to test the values
    * @return a new stream with the values that satisfy the predicate
    */
-  def filter(p: Return => Boolean): Stream[Return] = transform(r => if (p(r)) Step.Emit(r) else Step.Skip)
+  def filter(p: Return => Boolean): Stream[Return] = new Stream[Return](
+    task.map { pullR =>
+      new Pull[Return] {
+        override def pull(): Option[Return] = {
+          @annotation.tailrec
+          def loop(): Option[Return] = {
+            pullR.pull() match {
+              case Some(r) if p(r) => Some(r)
+              case Some(_) => loop()
+              case None => None
+            }
+          }
+          loop()
+        }
+      }
+    }
+  )
 
   def filterNot(p: Return => Boolean): Stream[Return] = filter(r => !p(r))
 
@@ -73,9 +89,25 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @param f the partial function to apply
    * @tparam T the new return type
    */
-  def collect[T](f: PartialFunction[Return, T]): Stream[T] = transform { r =>
-    f.lift(r).map(r => Step.Emit(r)).getOrElse(Step.Skip)
-  }
+  def collect[T](f: PartialFunction[Return, T]): Stream[T] = new Stream[T](
+    task.map { pullR =>
+      new Pull[T] {
+        override def pull(): Option[T] = {
+          @annotation.tailrec
+          def loop(): Option[T] = {
+            pullR.pull() match {
+              case Some(r) => f.lift(r) match {
+                case Some(t) => Some(t)
+                case None => loop()
+              }
+              case None => None
+            }
+          }
+          loop()
+        }
+      }
+    }
+  )
 
   /**
    * Takes values from the stream while the given predicate holds.
@@ -104,7 +136,15 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @tparam T the type of the transformed values
    * @return a new stream with the transformed values
    */
-  def map[T](f: Return => T): Stream[T] = transform(r => Step.Emit(f(r)))
+  def map[T](f: Return => T): Stream[T] = new Stream[T](
+    task.map { pullR =>
+      new Pull[T] {
+        override def pull(): Option[T] = {
+          pullR.pull().map(f)
+        }
+      }
+    }
+  )
 
   /**
    * Similar to map, but doesn't change the result. Allows doing something with each value without changing the result.
@@ -112,18 +152,34 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @param f the function to handle each value
    * @return Stream[Return]
    */
-  def foreach(f: Return => Unit): Stream[Return] = map { r =>
-    f(r)
-    r
-  }
+  def foreach(f: Return => Unit): Stream[Return] = new Stream[Return](
+    task.map { pullR =>
+      new Pull[Return] {
+        override def pull(): Option[Return] = {
+          pullR.pull() match {
+            case some @ Some(r) => 
+              f(r)
+              some
+            case None => None
+          }
+        }
+      }
+    }
+  )
 
   /**
    * Transforms the values in the stream to include the index of the value within the stream
    */
-  def zipWithIndex: Stream[(Return, Int)] = {
-    val counter = new AtomicInteger(0)
-    transform(r => Step.Emit((r, counter.getAndIncrement())))
-  }
+  def zipWithIndex: Stream[(Return, Int)] = new Stream[(Return, Int)](
+    task.map { pullR =>
+      val counter = new AtomicInteger(0)
+      new Pull[(Return, Int)] {
+        override def pull(): Option[(Return, Int)] = {
+          pullR.pull().map(r => (r, counter.getAndIncrement()))
+        }
+      }
+    }
+  )
 
   /**
    * Transforms the values in the stream using the given function that returns a new stream.
@@ -132,8 +188,39 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @tparam T the type of the values in the new streams
    * @return a new stream with the transformed values
    */
-  def flatMap[T](f: Return => Stream[T]): Stream[T] =
-    transform(r => Step.Concat(f(r).task.sync()))
+  def flatMap[T](f: Return => Stream[T]): Stream[T] = new Stream[T](
+    task.map { pullR =>
+      new Pull[T] {
+        private var currentPull: Option[Pull[T]] = None
+
+        override def pull(): Option[T] = {
+          @annotation.tailrec
+          def loop(): Option[T] = {
+            currentPull match {
+              case Some(innerPull) =>
+                innerPull.pull() match {
+                  case some @ Some(_) => some
+                  case None =>
+                    currentPull = None
+                    loop()
+                }
+              case None =>
+                pullR.pull() match {
+                  case Some(r) =>
+                    val innerStream = f(r)
+                    val innerPull = innerStream.task.sync()
+                    currentPull = Some(innerPull)
+                    loop()
+                  case None => None
+                }
+            }
+          }
+
+          loop()
+        }
+      }
+    }
+  )
 
   /**
    * Transforms the values in the stream using the given function that returns a task.
@@ -142,9 +229,31 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @tparam T the type of the values in the tasks
    * @return a new stream with the transformed values
    */
-  def evalMap[T](f: Return => Task[T]): Stream[T] = transform(r => Step.Emit(f(r).sync()))
+  def evalMap[T](f: Return => Task[T]): Stream[T] = new Stream[T](
+    task.map { pullR =>
+      new Pull[T] {
+        override def pull(): Option[T] = {
+          pullR.pull() match {
+            case Some(r) => Some(f(r).sync())
+            case None => None
+          }
+        }
+      }
+    }
+  )
 
-  def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] = transform(r => Step.Emit(forge(r).sync()))
+  def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] = new Stream[T](
+    task.map { pullR =>
+      new Pull[T] {
+        override def pull(): Option[T] = {
+          pullR.pull() match {
+            case Some(r) => Some(forge(r).sync())
+            case None => None
+          }
+        }
+      }
+    }
+  )
 
   /**
    * Similar to evalMap, but doesn't change the result. Allows doing something with each value without changing the
@@ -153,9 +262,20 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @param f the function to handle each value
    * @return Stream[Return]
    */
-  def evalForeach(f: Return => Task[Unit]): Stream[Return] = evalMap { r =>
-    f(r).map(_ => r)
-  }
+  def evalForeach(f: Return => Task[Unit]): Stream[Return] = new Stream[Return](
+    task.map { pullR =>
+      new Pull[Return] {
+        override def pull(): Option[Return] = {
+          pullR.pull() match {
+            case some @ Some(r) => 
+              f(r).sync()
+              some
+            case None => None
+          }
+        }
+      }
+    }
+  )
 
   /**
    * Chunks the stream's values into vectors of size `size` (except possibly the last).
@@ -501,14 +621,14 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @return Task[T]
    */
   def fold[T](initial: T)(f: (T, Return) => Task[T]): Task[T] =
-    task.map { pullR =>
-      var acc = initial
-      var next = pullR.pull()
-      while (next.isDefined) {
-        acc = f(acc, next.get).sync()
-        next = pullR.pull()
+    task.flatMap { pullR =>
+      def foldRec(acc: T): Task[T] = {
+        pullR.pull() match {
+          case Some(r) => f(acc, r).flatMap(foldRec)
+          case None => Task.pure(acc)
+        }
       }
-      acc
+      foldRec(initial)
     }
 
   /**
@@ -555,14 +675,30 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    *
    * @return a task that produces a list of the values in the stream
    */
-  def toList: Task[List[Return]] = fold(Vector.empty[Return]) { (vec, r) => Task(vec :+ r) }.map(_.toList)
+  def toList: Task[List[Return]] = {
+    task.map { pullR =>
+      val builder = List.newBuilder[Return]
+      var next = pullR.pull()
+      while (next.isDefined) {
+        builder += next.get
+        next = pullR.pull()
+      }
+      builder.result()
+    }
+  }
 
   /**
    * Counts the number of elements in the stream and fully evaluates it.
    *
    * @return a `Task[Int]` representing the total number of entries evaluated
    */
-  def count: Task[Int] = fold(0)((cnt, _) => Task(cnt + 1))
+  def count: Task[Int] = task.map { pullR =>
+    var count = 0
+    while (pullR.pull().isDefined) {
+      count += 1
+    }
+    count
+  }
 
   def par[T, R >: Return](maxThreads: Int = ParallelStream.DefaultMaxThreads,
                           maxBuffer: Int = ParallelStream.DefaultMaxBuffer)

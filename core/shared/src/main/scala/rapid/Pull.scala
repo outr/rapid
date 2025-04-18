@@ -1,8 +1,6 @@
 package rapid
 
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import scala.jdk.CollectionConverters._
 
 /** A simple, thread‑safe source of values of type T. */
 trait Pull[+T] {
@@ -14,37 +12,32 @@ trait Pull[+T] {
 }
 
 object Pull {
-  /**
-   * Wraps an Iterable in a lock‑free, thread‑safe Pull[T].
-   * Under the hood it enqueues all elements and then atomically polls.
-   */
-  def fromIterable[T](iterable: Iterable[T]): Pull[T] = {
-    val queue = new ConcurrentLinkedQueue[T](iterable.asJavaCollection)
-    () => Option(queue.poll())
-  }
-
   def fromList[T](list: List[T]): Pull[T] = {
     val state = new AtomicReference[List[T]](list)
     () => {
       @annotation.tailrec
       def loop(): Option[T] = {
         val current = state.get()
-        current match {
-          case h :: t =>
-            if (state.compareAndSet(current, t)) Some(h)
-            else loop()
-          case Nil =>
-            None
+        if (current.nonEmpty) {
+          val head = current.head
+          val tail = current.tail
+          if (state.compareAndSet(current, tail)) Some(head)
+          else loop()
+        } else {
+          None
         }
       }
-
       loop()
     }
   }
 
   def fromIndexedSeq[T](seq: IndexedSeq[T]): Pull[T] = {
     val idx = new AtomicInteger(0)
-    () => seq.lift(idx.getAndIncrement())
+    val len = seq.length
+    () => {
+      val i = idx.getAndIncrement()
+      if (i < len) Some(seq(i)) else None
+    }
   }
 
   def fromSeq[T](seq: Seq[T]): Pull[T] = seq match {
@@ -55,14 +48,8 @@ object Pull {
 
   def fromIterator[T](iter: Iterator[T]): Pull[T] = {
     val lock = new AnyRef
-    () => {
-      lock.synchronized {
-        if (iter.hasNext) {
-          Some(iter.next())
-        } else {
-          None
-        }
-      }
+    () => lock.synchronized {
+      if (iter.hasNext) Some(iter.next()) else None
     }
   }
 }
