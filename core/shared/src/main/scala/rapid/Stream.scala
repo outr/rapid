@@ -130,6 +130,57 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   }
 
   /**
+   * Takes elements from the stream while a predicate comparing the first element and the current element holds.
+   *
+   * Unlike `takeWhile`, which evaluates each element independently,
+   * this method compares every subsequent element to the first one.
+   * The first element is always emitted, and evaluation continues
+   * as long as `predicate(first, current)` returns true.
+   *
+   * This is useful when you want to capture a run of values that
+   * are similar or "close enough" to the initial element in some way.
+   *
+   * @param predicate A function that takes the first element and the current element,
+   *                  and returns true if the current element should be included.
+   * @return A new stream consisting of the first element and all subsequent elements
+   *         that satisfy the predicate when compared to the first.
+   *
+   * @example
+   * {{{
+   *   Stream(10, 11, 12, 50, 51).takeWhileWithFirst((first, current) => (current - first) < 10)
+   *   // Yields: 10, 11, 12
+   * }}}
+   */
+  def takeWhileWithFirst(predicate: (Return, Return) => Boolean): Stream[Return] = {
+    new Stream[Return](
+      task.map { pull =>
+        var firstOpt: Option[Return] = None
+        var done = false
+        () => {
+          if (done) None
+          else pull.pull() match {
+            case None =>
+              done = true
+              None
+            case Some(next) =>
+              firstOpt match {
+                case None =>
+                  firstOpt = Some(next)
+                  Some(next)
+                case Some(first) =>
+                  if (predicate(first, next)) Some(next)
+                  else {
+                    done = true
+                    None
+                  }
+              }
+          }
+        }
+      }
+    )
+  }
+
+  /**
    * Transforms the values in the stream using the given function.
    *
    * @param f the function to transform the values
@@ -261,6 +312,11 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    *
    * @param f the function to handle each value
    * @return Stream[Return]
+   */
+  def evalTap(f: Return => Task[Unit]): Stream[Return] = evalForeach(f)
+
+  /**
+   * Synonym for evalTap
    */
   def evalForeach(f: Return => Task[Unit]): Stream[Return] = new Stream[Return](
     task.map { pullR =>
