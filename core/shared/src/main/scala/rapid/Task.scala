@@ -257,6 +257,17 @@ trait Task[+Return] extends Any {
   def now: Task[Long] = flatMap(_ => Task(System.currentTimeMillis()))
 
   /**
+   * Convenience method to get the time elapsed to execute the task along with the return value.
+   */
+  def elapsed: Task[(Return, Double)] = Task.defer {
+    val start = System.currentTimeMillis()
+    map { r =>
+      val e = (System.currentTimeMillis() - start) / 1000.0
+      r -> e
+    }
+  }
+
+  /**
    * Defers the execution of the given task.
    *
    * @param task the task to defer
