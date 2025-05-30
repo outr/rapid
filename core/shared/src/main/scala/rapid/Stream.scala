@@ -688,6 +688,40 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     }
 
   /**
+   * Materializes the entire stream and applies a stateful, effectful transformation using a cursor that
+   * retains access to previously emitted values.
+   *
+   * This method is useful when you need context-aware stream processing — such as looking back at earlier
+   * elements, mutating history, or skipping output altogether — which requires buffering the full stream.
+   *
+   * The function `f` receives the next input element and the current cursor, and returns a new `Cursor`
+   * wrapped in a `Task`. The cursor allows access to previous output elements via `previous(n)`,
+   * and modification through `modifyPrevious`.
+   *
+   * Example usage:
+   * {{{
+   *   stream.materializedCursorEvalMap[R, T] { (next, cursor) =>
+   *     if (cursor.previous(1).contains(next)) Task.pure(cursor) // skip duplicate
+   *     else Task.pure(cursor.add(next))
+   *   }
+   * }}}
+   *
+   * @tparam R a supertype of the stream's element type, needed due to type variance
+   * @tparam T the output type of the transformed stream
+   * @param f a function taking the current element and cursor state, returning the updated cursor
+   * @return a new Stream[T] representing the transformed and fully materialized stream
+   */
+  def materializedCursorEvalMap[R >: Return, T](f: (R, Cursor[R, T]) => Task[Cursor[R, T]],
+                                                handleEnd: Cursor[R, T] => Task[Cursor[R, T]] = (c: Cursor[R, T]) => Task.pure(c)): Stream[T] = Stream.force {
+    fold(Cursor[R, T](Vector.empty)) { (cursor, next) =>
+      f(next, cursor)
+    }.map { cursor =>
+      Stream.force(handleEnd(cursor).map(c => Stream.emits(c.history)))
+    }
+  }
+
+
+  /**
    * Reduces the elements of this stream using the given binary operator,
    * starting with the first element as the initial value and combining
    * sequentially with the rest.
@@ -734,6 +768,18 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   def toList: Task[List[Return]] = {
     task.map { pullR =>
       val builder = List.newBuilder[Return]
+      var next = pullR.pull()
+      while (next.isDefined) {
+        builder += next.get
+        next = pullR.pull()
+      }
+      builder.result()
+    }
+  }
+
+  def toVector: Task[Vector[Return]] = {
+    task.map { pullR =>
+      val builder = Vector.newBuilder[Return]
       var next = pullR.pull()
       while (next.isDefined) {
         builder += next.get
