@@ -287,6 +287,13 @@ trait Task[+Return] extends Any {
   }
 
   /**
+   * Convenience method to disable a task from executing without removing it entirely.
+   *
+   * Simply returns Task.unit instead.
+   */
+  def disabled: Task[Unit] = Task.unit
+
+  /**
    * Chains the task to a Unit result.
    *
    * @return a new task that returns `Unit` after the existing task completes
