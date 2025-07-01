@@ -278,13 +278,26 @@ trait Task[+Return] extends Any {
 
   /**
    * Convenience conditional execution of the Task. If the condition is true, the task will execute the instruction set,
-   * but if false, it will immediately return upon execution doing nothing.
+   * but if false, it will immediately return upon execution doing nothing. The return is Some(r) if the condition is
+   * met and None if the condition is false.
    */
-  def when(condition: Boolean): Task[Unit] = if (condition) {
-    this.unit
-  } else {
-    Task.unit
+  def when(condition: => Boolean): Task[Option[Return]] = Task.defer {
+    if (condition) {
+      this.map(Some.apply)
+    } else {
+      Task.pure(None)
+    }
   }
+
+  /**
+   * Convenience conditional execution of the Task. If the condition is true, the task will execute the instruction set,
+   * but if false, it will return upon execution returning "default".
+   */
+  def when[R >: Return](condition: => Boolean, default: => R): Task[R] = when(condition)
+    .map {
+      case Some(r) => r
+      case None => default
+    }
 
   /**
    * Convenience method to disable a task from executing without removing it entirely.
