@@ -293,6 +293,15 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     }
   )
 
+  /**
+   * Transforms the values in the stream using the given function that returns a task option.
+   *
+   * @param f the function to transform the values into tasks of Option
+   * @tparam T the type of the values in the tasks
+   * @return a new stream with the transformed and flattened values
+   */
+  def evalFlatMap[T](f: Return => Task[Option[T]]): Stream[T] = evalMap(f).flatten
+
   def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] = new Stream[T](
     task.map { pullR =>
       new Pull[T] {
