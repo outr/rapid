@@ -17,13 +17,13 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "0.16.0-SNAPSHOT"
+ThisBuild / version := "0.16.0"
 ThisBuild / scalaVersion := scala213
 ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
 
-ThisBuild / sonatypeCredentialHost := "s01.oss.sonatype.org"
-ThisBuild / sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
+ThisBuild / sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost
+ThisBuild / publishMavenStyle := true
 ThisBuild / publishTo := sonatypePublishToBundle.value
 ThisBuild / sonatypeProfileName := org
 ThisBuild / licenses := Seq("MIT" -> url(s"https://github.com/$githubOrg/$projectName/blob/master/LICENSE"))
