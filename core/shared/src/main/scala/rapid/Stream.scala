@@ -233,6 +233,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   )
 
   /**
+   * Similar to zipWithIndex, but first does a count on the stream and includes the total (Return, Index, Total).
+   *
+   * Note: this must evaluate the full stream to count
+   */
+  def zipWithIndexAndTotal: Stream[(Return, Int, Int)] = Stream.force {
+    count.map { total =>
+      zipWithIndex.map {
+        case (r, index) => (r, index, total)
+      }
+    }
+  }
+
+  /**
    * Transforms the values in the stream using the given function that returns a new stream.
    *
    * @param f the function to transform the values into new streams
