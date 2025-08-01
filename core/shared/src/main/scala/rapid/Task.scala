@@ -6,6 +6,7 @@ import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.tailrec
 import scala.collection.BuildFrom
+import scala.concurrent.TimeoutException
 import scala.concurrent.duration.{DurationLong, FiniteDuration}
 import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
@@ -265,6 +266,35 @@ trait Task[+Return] extends Any {
       val e = (System.currentTimeMillis() - start) / 1000.0
       r -> e
     }
+  }
+
+  /**
+   * Sleeps until the condition is met (returns true) or timeout
+   *
+   * @param condition the condition that must return true to proceed
+   * @param delay the delay between tests of condition (defaults to 1 second)
+   * @param timeout the timeout before this condition fails (defaults to 24 hours)
+   * @param errorOnTimeout whether to throw a TimeoutException on timeout (defaults to true)
+   */
+  def waitUntil(condition: Task[Boolean],
+                delay: FiniteDuration = 1.second,
+                timeout: FiniteDuration = 24.hours,
+                errorOnTimeout: Boolean = true): Task[Return] = flatTap { _ =>
+    val start = System.currentTimeMillis()
+    val timeoutTime = start + timeout.toMillis
+
+    def recurse: Task[Unit] = condition.flatMap {
+      case true => Task.unit
+      case false if System.currentTimeMillis() >= timeoutTime =>
+        if (errorOnTimeout) {
+          Task.error(new TimeoutException(s"Condition timed out after $timeout"))
+        } else {
+          Task.unit
+        }
+      case false => Task.sleep(delay).next(recurse)
+    }
+
+    recurse
   }
 
   /**

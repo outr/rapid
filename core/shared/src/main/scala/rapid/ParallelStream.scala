@@ -3,12 +3,10 @@ package rapid
 
 import scala.collection.mutable.ListBuffer
 
-case class ParallelStream[T, R](
-                                 stream: Stream[T],
-                                 forge: Forge[T, Option[R]],
-                                 maxThreads: Int  = ParallelStream.DefaultMaxThreads,
-                                 maxBuffer: Int   = ParallelStream.DefaultMaxBuffer
-                               ) {
+case class ParallelStream[T, R](stream: Stream[T],
+                                forge: Forge[T, Option[R]],
+                                maxThreads: Int = ParallelStream.DefaultMaxThreads,
+                                maxBuffer: Int = ParallelStream.DefaultMaxBuffer) {
   def collect[U](pf: PartialFunction[R, U]): ParallelStream[T, U] =
     copy[T, U](
       forge = forge.map(optR => optR.flatMap(r => pf.lift(r)))
@@ -31,7 +29,7 @@ case class ParallelStream[T, R](
   def toList: Task[List[R]] =
     Task.flatMap { _ =>
       val buf = ListBuffer.empty[R]
-      val c   = Task.completable[List[R]]
+      val c = Task.completable[List[R]]
       compile(buf += _, _ => c.success(buf.toList))
       c
     }
@@ -39,7 +37,7 @@ case class ParallelStream[T, R](
   def fold[U](initial: U)(f: (U, R) => Task[U]): Task[U] =
     Task.flatMap { _ =>
       var acc = initial
-      val c   = Task.completable[U]
+      val c = Task.completable[U]
       compile(r => acc = f(acc, r).sync(), _ => c.success(acc))
       c
     }
@@ -50,5 +48,5 @@ case class ParallelStream[T, R](
 
 object ParallelStream {
   val DefaultMaxThreads = Runtime.getRuntime.availableProcessors * 2
-  val DefaultMaxBuffer  = 100_000
+  val DefaultMaxBuffer = 100_000
 }
