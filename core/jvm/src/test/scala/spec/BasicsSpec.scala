@@ -113,5 +113,10 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       task.sync() shouldBe >(now)
       task.sync() shouldBe >=(later)
     }
+    "verify condition actually delays properly" in {
+      val start = System.currentTimeMillis()
+      Task.condition(Task.function(System.currentTimeMillis() - start > 500), delay = 25.millis).sync()
+      (System.currentTimeMillis() - start) should be > 500L
+    }
   }
 }

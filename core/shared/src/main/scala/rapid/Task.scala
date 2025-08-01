@@ -276,7 +276,7 @@ trait Task[+Return] extends Any {
    * @param timeout the timeout before this condition fails (defaults to 24 hours)
    * @param errorOnTimeout whether to throw a TimeoutException on timeout (defaults to true)
    */
-  def waitUntil(condition: Task[Boolean],
+  def condition(condition: Task[Boolean],
                 delay: FiniteDuration = 1.second,
                 timeout: FiniteDuration = 24.hours,
                 errorOnTimeout: Boolean = true): Task[Return] = flatTap { _ =>
