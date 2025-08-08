@@ -47,11 +47,11 @@ ThisBuild / Test / testOptions += Tests.Argument("-oDF")
 
 ThisBuild / Test / parallelExecution := false
 
-val scribeVersion: String = "3.16.1"
+val scribeVersion: String = "3.17.0"
 
 /// Testing and Benchmarking Libraries
 
-val catsVersion: String = "3.6.2"
+val catsVersion: String = "3.6.3"
 
 val fs2Version: String = "3.12.0"
 
