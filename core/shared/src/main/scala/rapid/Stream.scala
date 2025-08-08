@@ -2,10 +2,11 @@ package rapid
 
 import java.io.{BufferedInputStream, File, FileInputStream, InputStream}
 import java.nio.file.Path
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.io.Source
 
 /**
@@ -832,6 +833,59 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     maxThreads = maxThreads,
     maxBuffer = maxBuffer
   )
+
+  /**
+   * Executes the stream in parallel using a fixed number of threads, applying the given [[Forge]]
+   * function to each element purely for side effects (i.e., `Unit` results are discarded).
+   *
+   * This method is optimized for high-speed, fire-and-forget processing where:
+   * - Output ordering does not matter
+   * - No results are collected
+   * - All elements are processed via an effectful computation (`Forge[R, Unit]`)
+   *
+   * Work is pulled from the stream and dispatched to `threads` concurrent workers, each of which
+   * continues processing until the stream is exhausted or an error occurs. If any task fails,
+   * the first encountered exception is propagated after all workers shut down and future tasks are skipped.
+   *
+   * @param threads the number of concurrent workers to use
+   * @param forge the effectful function to apply to each element
+   * @tparam R the supertype of the stream's element type
+   * @return a `Task[Unit]` that completes when all elements are processed, or fails on the first error
+   */
+  def parFast[R >: Return](threads: Int = ParallelStream.DefaultMaxThreads)
+                          (forge: Forge[R, Unit]): Task[Unit] = Task {
+    val pull = task.sync()
+    val throwable = new AtomicReference[Option[Throwable]](None)
+    val latch = new CountDownLatch(threads)
+
+    def recursivePull(): Task[Unit] = {
+      if (throwable.get().isEmpty) {
+        pull.pull() match {
+          case Some(r) =>
+            forge(r)
+              .next(Task.defer(recursivePull()))
+              .handleError { t =>
+                throwable.compareAndSet(None, Some(t))
+                Task.unit
+              }
+
+          case None => Task.unit
+        }
+      } else Task.unit
+    }
+
+    (0 until threads).foreach { i =>
+      Task.defer {
+        recursivePull()
+          .guarantee(Task {
+            latch.countDown()
+          })
+      }.start()
+    }
+
+    latch.await()
+    throwable.get().foreach(throw _)
+  }
 }
 
 object Stream {

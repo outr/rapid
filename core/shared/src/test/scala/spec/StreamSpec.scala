@@ -8,6 +8,7 @@ import rapid._
 
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration.DurationInt
 
 class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
@@ -47,16 +48,25 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val chunks = Stream[Int]().chunk(10).evalMap { v => Task(v.map(_ * 100)) }.toList.sync()
       chunks should be(Nil)
     }
-    /*"evaluate elements in parallel with parEvalMap" in {
-      val stream = Stream.fromList(List(1, 2, 3, 4))
-      val result = stream.parEvalMap(2)(x => Task(x * 2)).toList.sync()
+    "evaluate elements in parallel with par" in {
+      val stream = Stream.emits(List(1, 2, 3, 4))
+      val result = stream.par(2)(x => Task(x * 2)).toList.sync()
       result.sorted shouldEqual List(2, 4, 6, 8) // Sorting to account for parallel execution order
     }
-    "limit parallelism with parEvalMap" in {
-      val stream = Stream.fromList(List(1, 2, 3, 4, 5, 6))
-      val result = stream.parEvalMap(3)(x => Task(x * 2)).toList.sync()
+    "limit parallelism with par" in {
+      val stream = Stream.emits(List(1, 2, 3, 4, 5, 6))
+      val result = stream.par(3)(x => Task(x * 2)).toList.sync()
       result.sorted shouldEqual List(2, 4, 6, 8, 10, 12) // Sorting to account for parallel execution order
-    }*/
+    }
+    "use parFast to quickly process with many threads" in {
+      val stream = Stream.emits(0L until 1_000_000L)
+      val add = new AtomicLong(0L)
+      stream.parFast() { i =>
+        add.addAndGet(i)
+        Task.unit
+      }.sync()
+      add.get() should be(499999500000L)
+    }
     "append two streams" in {
       val stream1 = Stream.emits(List(1, 2, 3))
       val stream2 = Stream.emits(List(4, 5, 6))
