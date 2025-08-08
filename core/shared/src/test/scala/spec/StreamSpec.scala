@@ -272,5 +272,87 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val forge = Forge[Int, Int](i => Task(i * 3))
       Stream.emits(List(2, 3, 4)).evalForge(forge).toList.sync() shouldEqual List(6, 9, 12)
     }
+    "take n elements then stop" in {
+      val out = Stream.emits(1 to 10).take(3).toList.sync()
+      out shouldEqual List(1, 2, 3)
+    }
+    "drop n elements then emit the rest" in {
+      val out = Stream.emits(1 to 5).drop(2).toList.sync()
+      out shouldEqual List(3, 4, 5)
+    }
+    "dropWhile drops until predicate fails then emits everything" in {
+      val out = Stream.emits(List(1, 2, 3, 1, 2, 3)).dropWhile(_ < 3).toList.sync()
+      out shouldEqual List(3, 1, 2, 3)
+    }
+    "slice selects half-open range [from, until)" in {
+      val out = Stream.emits(0 until 10).slice(4, 8).toList.sync()
+      out shouldEqual List(4, 5, 6, 7)
+    }
+    "sliding windows with default step=1" in {
+      val out = Stream.emits(1 to 5).sliding(size = 3).toList.sync()
+      out shouldEqual List(
+        Vector(1, 2, 3),
+        Vector(2, 3, 4),
+        Vector(3, 4, 5),
+        Vector(4, 5),
+        Vector(5)
+      )
+    }
+    "scanLeft accumulates and emits intermediate states" in {
+      val out = Stream.emits(List(1, 2, 3, 4))
+        .scanLeft(0)(_ + _)
+        .toList
+        .sync()
+      out shouldEqual List(1, 3, 6, 10)
+    }
+    "fold accumulates via effect and returns final value" in {
+      val out = Stream.emits(List(1, 2, 3, 4))
+        .fold(0)((acc, n) => Task(acc + n))
+        .sync()
+      out shouldEqual 10
+    }
+    "evalFlatMap flattens Option results" in {
+      val out = Stream.emits(1 to 6)
+        .evalFlatMap(n => Task(if (n % 2 == 0) Some(n * 10) else None))
+        .toList
+        .sync()
+      out shouldEqual List(20, 40, 60)
+    }
+    "evalForeach (alias evalTap) runs effects without altering stream" in {
+      val seen = scala.collection.mutable.ArrayBuffer.empty[Int]
+      val out = Stream.emits(List(3, 4))
+        .evalForeach(n => Task { seen += n })
+        .toList
+        .sync()
+      out shouldEqual List(3, 4)
+      seen.toList shouldEqual List(3, 4)
+    }
+    "intersperse inserts separators between elements" in {
+      val out = Stream.emits(List("a", "b", "c"))
+        .intersperse("|")
+        .toList
+        .sync()
+      out shouldEqual List("a", "|", "b", "|", "c")
+    }
+    "partition splits by predicate into left/right streams" in {
+      val (evens, odds) = Stream.emits(1 to 6).partition(_ % 2 == 0)
+      evens.toList.sync() shouldEqual List(2, 4, 6)
+      odds.toList.sync()  shouldEqual List(1, 3, 5)
+    }
+    "groupBy builds a Map[K, List[V]] and preserves per-key order" in {
+      val out = Stream.emits(List("aa", "a", "bbb", "b", "cc"))
+        .groupBy(_.head)
+        .sync()
+      out('a') shouldEqual List("aa", "a")
+      out('b') shouldEqual List("bbb", "b")
+      out('c') shouldEqual List("cc")
+    }
+    "count returns element count" in {
+      Stream.emits(1 to 123).count.sync() shouldEqual 123
+      Stream.empty[Int].count.sync() shouldEqual 0
+    }
+    "toVector collects all elements" in {
+      Stream.emits(List(5, 6, 7)).toVector.sync() shouldEqual Vector(5, 6, 7)
+    }
   }
 }

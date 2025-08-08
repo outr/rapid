@@ -460,15 +460,14 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    */
   def group(separator: Return => Boolean): Stream[List[Return]] =
     new Stream(task.map { pullR =>
-      new Pull[List[Return]] {
-        private val done = new AtomicBoolean(false)
+      var done = false
 
+      new Pull[List[Return]] {
         override def pull(): Option[List[Return]] = {
-          if (done.get()) {
+          if (done) {
             None
           } else {
-            // buffer one group
-            val buf = ListBuffer[Return]()
+            val buf = scala.collection.mutable.ListBuffer.empty[Return]
             var boundaryReached = false
 
             while (!boundaryReached) {
@@ -476,19 +475,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
                 case Some(r) if !separator(r) =>
                   buf += r
                 case Some(_) =>
-                  // hit a separator, end this group
                   boundaryReached = true
                 case None =>
-                  // end of stream: mark done and stop grouping
-                  done.set(true)
+                  done = true
                   boundaryReached = true
               }
             }
 
             if (buf.isEmpty) {
-              // we either saw only separators or hit end‑of‑stream immediately
-              // if there's more to do, skip empty and try again
-              if (done.get()) None else pull()
+              if (done) {
+                None
+              } else {
+                pull()
+              }
             } else {
               Some(buf.toList)
             }
@@ -529,27 +528,28 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   def sliding(size: Int, step: Int = 1): Stream[Vector[Return]] = {
     require(size > 0 && step > 0)
     new Stream(task.map { pullR =>
-      val buffer = new scala.collection.mutable.Queue[Return]()
-      val done = new AtomicBoolean(false)
+      val buf = new scala.collection.mutable.Queue[Return]()
+      var eof = false
 
       new Pull[Vector[Return]] {
         override def pull(): Option[Vector[Return]] = {
-          if (done.get()) None
-          else {
-            while (buffer.size < size) {
-              pullR.pull() match {
-                case Some(r) => buffer.enqueue(r)
-                case None =>
-                  done.set(true)
-                  if (buffer.nonEmpty) {
-                    val out = buffer.toVector
-                    buffer.clear()
-                    return Some(out)
-                  } else return None
-              }
+          // top up the buffer to `size` unless we've seen EOF
+          while (!eof && buf.size < size) {
+            pullR.pull() match {
+              case Some(r) => buf.enqueue(r)
+              case None    => eof = true
             }
-            val out = buffer.take(size).toVector
-            for (_ <- 0 until step if buffer.nonEmpty) buffer.dequeue()
+          }
+
+          if (buf.isEmpty) {
+            None
+          } else {
+            val out = buf.take(size).toVector
+            var i = 0
+            while (i < step && buf.nonEmpty) {
+              buf.dequeue()
+              i += 1
+            }
             Some(out)
           }
         }
@@ -645,10 +645,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   }
 
   def groupBy[K](f: Return => K): Task[Map[K, List[Return]]] =
-    fold(Map.empty[K, List[Return]]) { (acc, r) =>
-      val k = f(r)
-      Task.pure(acc.updated(k, r :: acc.getOrElse(k, Nil)))
-    }.map(_.view.mapValues(_.reverse).toMap)
+    task.map { pullR =>
+      val m = new scala.collection.mutable.HashMap[K, scala.collection.mutable.ListBuffer[Return]]
+      var next = pullR.pull()
+      while (next.isDefined) {
+        val r = next.get
+        val k = f(r)
+        val buf = m.getOrElseUpdate(k, scala.collection.mutable.ListBuffer.empty[Return])
+        buf += r
+        next = pullR.pull()
+      }
+      // freeze to the requested shape
+      m.iterator.map { case (k, buf) => k -> buf.toList }.toMap
+    }
 
   /**
    * Appends another stream to this stream.
