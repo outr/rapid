@@ -28,9 +28,9 @@ case class ConcurrentQueue[T](capacity: Int) {
     incremented
   }
 
-  def dequeue(): Opt[T] = {
-    val o = Opt(q.poll())
-    if (o.notEmpty) {
+  def dequeue(): Option[T] = {
+    val o = Option(q.poll())
+    if (o.nonEmpty) {
       s.decrementAndGet()
     }
     o

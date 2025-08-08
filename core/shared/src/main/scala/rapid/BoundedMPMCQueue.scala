@@ -76,10 +76,9 @@ final class BoundedMPMCQueue[A](capacity: Int) {
   /**
    * Dequeues an element.
    *
-   * @return an Opt.Value(element) if an element was dequeued,
-   *         or Opt.Empty if the queue is empty.
+   * @return Some(element) if an element was dequeued
    */
-  def dequeue(): Opt[A] = {
+  def dequeue(): Option[A] = {
     while (true) {
       val currentHead = head.get()
       val index = (currentHead % capacity).toInt
@@ -95,17 +94,17 @@ final class BoundedMPMCQueue[A](capacity: Int) {
           // Mark the cell as available by setting its sequence to
           // (currentHead + capacity). This lets producers know that the slot can be reused.
           cell.sequence = currentHead + capacity
-          return Opt.Value(result)
+          return Some(result)
         }
       } else if (dif < 0) {
         // If dif is negative, the slot is not yet ready for reading => queue is empty.
-        return Opt.Empty
+        return None
       } else {
         // The cell is in the process of being updated; yield and retry.
         Thread.`yield`()
       }
     }
     // Unreachable
-    Opt.Empty
+    None
   }
 }

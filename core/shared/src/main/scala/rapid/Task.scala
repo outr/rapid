@@ -439,7 +439,7 @@ trait Task[+Return] extends Any {
 }
 
 object Task extends task.UnitTask {
-  var monitor: Opt[TaskMonitor] = Opt.Empty
+  var monitor: Option[TaskMonitor] = None
 
   def apply[T](f: => T): Task[T] = {
     val t = SingleTask(() => f)

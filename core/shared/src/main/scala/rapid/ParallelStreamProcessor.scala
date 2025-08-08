@@ -95,10 +95,7 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
   def total: Option[Int] =
     if (_total == -1) None else Some(_total)
 
-  private def dequeueReady(): Opt[(Int, Option[R])] = {
-    val item = readyQueue.poll()
-    if (item != null) Opt.Value(item) else Opt.Empty
-  }
+  private def dequeueReady(): Option[(Int, Option[R])] = Option(readyQueue.poll())
 
   // Start the final ordering fiber
   Task {
@@ -116,8 +113,8 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
       complete(valueCounter)
     } else {
       val (updatedBuffer, gotNew) = dequeueReady() match {
-        case Opt.Value((idx, res)) => (buffer + (idx -> res), true)
-        case Opt.Empty => (buffer, false)
+        case Some((idx, res)) => (buffer + (idx -> res), true)
+        case None => (buffer, false)
       }
       updatedBuffer.get(expected) match {
         case Some(result) =>
