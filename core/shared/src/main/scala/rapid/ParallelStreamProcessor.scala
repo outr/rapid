@@ -4,6 +4,7 @@ package rapid
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.annotation.tailrec
+import scala.collection.mutable
 
 case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
                                          handle: R => Unit,
@@ -19,26 +20,58 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
   // feed producer
   pullTask.map { pull =>
     var idx = 0
+    val batchSize = 64
+    val batch = new Array[(T, Int)](batchSize)
+    var n = 0
+
+    def spinOrNap(backoff: Int): Int = {
+      if (backoff < 1024) {
+        val b = backoff << 1
+        java.lang.Thread.onSpinWait()
+        b
+      } else {
+        java.util.concurrent.locks.LockSupport.parkNanos(1_000L)
+        backoff
+      }
+    }
+
+    def flushBatch(): Unit = {
+      var i = 0
+      var backoff = 1
+      while (i < n && failure.isEmpty) {
+        var ok = workQueue.enqueue(batch(i))
+        while (!ok && failure.isEmpty) {
+          backoff = spinOrNap(backoff)
+          ok = workQueue.enqueue(batch(i))
+        }
+        if (ok) {
+          backoff = 1
+          i += 1
+        }
+      }
+      n = 0
+    }
+
     @scala.annotation.tailrec
     def loadNext(): Unit = {
       if (failure.nonEmpty) {
+        if (n > 0) flushBatch()
         _total = idx
-      } else pull.pull() match {
-        case Some(t) =>
-          var backoff = 1
-          while (!workQueue.enqueue((t, idx))) {
-            if (backoff < 1024) {
-              backoff = backoff << 1
-              Thread.onSpinWait()
-            }
-            else java.util.concurrent.locks.LockSupport.parkNanos(1_000L)
-          }
-          idx += 1
-          loadNext()
-        case None =>
-          _total = idx
+      } else {
+        pull.pull() match {
+          case Some(t) =>
+            batch(n) = (t, idx)
+            n += 1
+            idx += 1
+            if (n == batchSize) flushBatch()
+            loadNext()
+          case None =>
+            if (n > 0) flushBatch()
+            _total = idx
+        }
       }
     }
+
     loadNext()
   }.start()
 
@@ -84,7 +117,7 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
 
   // final ordering fiber (counts only Some, propagates failure)
   Task {
-    val buffer = scala.collection.mutable.HashMap.empty[Int, Option[R]]
+    val buffer = mutable.HashMap.empty[Int, Option[R]]
     var expected = 0
     var delivered = 0
     var backoff = 1
