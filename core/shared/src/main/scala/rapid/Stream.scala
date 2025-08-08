@@ -853,38 +853,33 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @return a `Task[Unit]` that completes when all elements are processed, or fails on the first error
    */
   def parFast[R >: Return](threads: Int = ParallelStream.DefaultMaxThreads)
-                          (forge: Forge[R, Unit]): Task[Unit] = Task {
+                          (forge: Forge[R, Unit]): Task[Unit] = Task.defer {
     val pull = task.sync()
-    val throwable = new AtomicReference[Option[Throwable]](None)
-    val latch = new CountDownLatch(threads)
+    @volatile var throwable = Option.empty[Throwable]
 
-    def recursivePull(): Task[Unit] = {
-      if (throwable.get().isEmpty) {
-        pull.pull() match {
-          case Some(r) =>
-            forge(r)
-              .next(Task.defer(recursivePull()))
-              .handleError { t =>
-                throwable.compareAndSet(None, Some(t))
-                Task.unit
-              }
+    def puller: Task[Unit] = Task {
+      @tailrec
+      def recurse(): Unit = pull.pull() match {
+        case _ if throwable.nonEmpty => // Stop
+        case None => // Nothing to do
+        case Some(r) =>
+          forge(r).handleError { t =>
+            throwable = Some(t)
+            Task.unit
+          }.sync()
+          recurse()
+      }
 
-          case None => Task.unit
-        }
-      } else Task.unit
+      recurse()
     }
 
-    (0 until threads).foreach { i =>
-      Task.defer {
-        recursivePull()
-          .guarantee(Task {
-            latch.countDown()
-          })
-      }.start()
+    val tasks = (0 until threads).toList.map { _ =>
+      puller
     }
 
-    latch.await()
-    throwable.get().foreach(throw _)
+    tasks.tasksPar.map { _ =>
+      throwable.foreach(throw _)
+    }
   }
 }
 
