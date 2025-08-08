@@ -5,6 +5,7 @@ import java.nio.file.Path
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.io.Source
@@ -224,11 +225,13 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    */
   def zipWithIndex: Stream[(Return, Int)] = new Stream[(Return, Int)](
     task.map { pullR =>
-      val counter = new AtomicInteger(0)
-      new Pull[(Return, Int)] {
-        override def pull(): Option[(Return, Int)] = {
-          pullR.pull().map(r => (r, counter.getAndIncrement()))
-        }
+      var i = 0
+      () => pullR.pull() match {
+        case Some(r) =>
+          val idx = i
+          i += 1
+          Some((r, idx))
+        case None => None
       }
     }
   )
@@ -406,46 +409,45 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    */
   def groupSequential[G, R >: Return](grouper: R => G): Stream[Grouped[G, R]] =
     new Stream(task.map { pullR =>
-      new Pull[Grouped[G, R]] {
-        private val done = new AtomicBoolean(false)
-        private val nextElem = new AtomicReference[Option[R]](None)
+      var pushedBack: Option[R] = None
+      var done = false
 
-        override def pull(): Option[Grouped[G, R]] = {
-          if (done.get()) {
-            None
+      () => {
+        if (done)
+          None
+        else {
+          val firstOpt = if (pushedBack.isDefined) {
+            val v = pushedBack
+            pushedBack = None
+            v
           } else {
-            // first item: either the pushed‑back one, or a fresh pull
-            val firstOpt = nextElem.getAndSet(None) match {
-              case some @ Some(_) => some
-              case None           => pullR.pull()
-            }
-
-            firstOpt match {
-              case None =>
-                done.set(true)
-                None
-
-              case Some(first) =>
-                val groupKey = grouper(first)
-                val buf = ListBuffer[R]()
-                buf += first
-
-                // consume until the key changes or we run out
-                var next = pullR.pull()
-                while (next.isDefined && grouper(next.get) == groupKey) {
-                  buf += next.get
-                  next = pullR.pull()
-                }
-
-                // if we saw an element from the next group, stash it
-                if (next.isDefined) {
-                  nextElem.set(next)
+            pullR.pull()
+          }
+          firstOpt match {
+            case None =>
+              done = true
+              None
+            case Some(first) =>
+              val key = grouper(first)
+              val buf = scala.collection.mutable.ListBuffer.empty[R]
+              buf += first
+              var keepGoing = true
+              while (keepGoing) {
+                val n = pullR.pull()
+                if (n.isDefined) {
+                  val v = n.get
+                  if (grouper(v) == key) {
+                    buf += v
+                  } else {
+                    pushedBack = Some(v)
+                    keepGoing = false
+                  }
                 } else {
-                  done.set(true)
+                  done = true
+                  keepGoing = false
                 }
-
-                Some(Grouped(groupKey, buf.toList))
-            }
+              }
+              Some(Grouped(key, buf.toList))
           }
         }
       }
@@ -590,8 +592,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   }
 
   def distinct: Stream[Return] = {
-    val seen = scala.collection.concurrent.TrieMap.empty[Return, Unit]
-    filter { r => seen.putIfAbsent(r, ()).isEmpty }
+    val seen = mutable.Set.empty[Return]
+    filter(seen.add)
   }
 
   def intersperse[T >: Return](separator: T): Stream[T] = {
