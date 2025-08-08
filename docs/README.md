@@ -25,22 +25,22 @@ It provides:
 
 ### Core
 ```scala
-libraryDependencies += "com.outr" %% "rapid-core" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-core" % "@VERSION@"
 ```
 
 ### Scribe (Effects for Logging)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-scribe" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-scribe" % "@VERSION@"
 ```
 
 ### Test (Test features for running Task effects in ScalaTest)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-test" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-test" % "@VERSION@"
 ```
 
 ### Cats (Interoperability with Cats-Effect)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-cats" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-cats" % "@VERSION@"
 ```
 
 ---
@@ -51,29 +51,19 @@ libraryDependencies += "com.outr" %% "rapid-cats" % "0.18.0"
 A `Task[A]` is a description of a computation that produces a value of type `A`.
 It can be run synchronously with `.sync()` or executed in a `Fiber` for concurrency.
 
-```scala
+```scala mdoc
 import rapid.Task
 import scala.concurrent.duration._
 
 val hello: Task[Unit] = Task {
   println("Hello, Rapid!")
 }
-// hello: Task[Unit] = SingleTask(f = <function0>)
 
 val delayed: Task[String] =
   Task.sleep(500.millis).map(_ => "Done!")
-// delayed: Task[String] = FlatMapTask(
-//   source = FlatMapTask(
-//     source = Unit,
-//     forge = FunctionForge(f = rapid.Task$$Lambda/0x00007fb623b50000@2afed68f)
-//   ),
-//   forge = FunctionForge(f = rapid.Task$$Lambda/0x00007fb623b51180@2857b3f9)
-// )
 
 hello.sync()
-// Hello, Rapid!
 println(delayed.sync())
-// Done!
 ```
 
 ---
@@ -82,21 +72,17 @@ println(delayed.sync())
 A `Fiber[A]` is a lightweight handle to a running `Task[A]`.
 You can start tasks on fibers and wait for them to complete.
 
-```scala
+```scala mdoc
 import rapid.Task
 
 val fiber = Task {
   Thread.sleep(1000)
   "Completed!"
 }.start()
-// fiber: rapid.Fiber[String] = Fiber(VirtualThreadFiber)
 
 println("Running in background...")
-// Running in background...
 val result = fiber.sync()
-// result: String = "Completed!"
 println(result) // "Completed!"
-// Completed!
 ```
 
 ---
@@ -105,30 +91,24 @@ println(result) // "Completed!"
 A `Stream[A]` is a lazy, composable sequence of `A` values backed by `Task`.
 You can transform it sequentially or in parallel.
 
-```scala
+```scala mdoc
 import rapid.{Stream, Task}
 
 val s = Stream.emits(1 to 5)
-// s: Stream[Int] = rapid.Stream@3a0e6891
 
 val doubled = s.map(_ * 2).toList.sync()
-// doubled: List[Int] = List(2, 4, 6, 8, 10)
 // List(2, 4, 6, 8, 10)
 
 val parallel = s.par(4)(i => Task(i * 2)).toList.sync()
-// parallel: List[Int] = List(2, 4, 6, 8, 10)
 // Parallel map with up to 4 threads
 ```
 
 ### Common Operations
 
-```scala
+```scala mdoc
 val filtered = s.filter(_ % 2 == 0).toList.sync()     // List(2, 4)
-// filtered: List[Int] = List(2, 4)
 val taken    = s.take(3).toList.sync()                // List(1, 2, 3)
-// taken: List[Int] = List(1, 2, 3)
 val zipped   = s.zipWithIndex.toList.sync()           // List((1,0), (2,1), ...)
-// zipped: List[(Int, Int)] = List((1, 0), (2, 1), (3, 2), (4, 3), (5, 4))
 ```
 
 ---
@@ -138,23 +118,21 @@ val zipped   = s.zipWithIndex.toList.sync()           // List((1,0), (2,1), ...)
 ### `.par`
 Parallel map with a maximum number of threads.
 
-```scala
+```scala mdoc
 Stream.emits(1 to 10)
   .par(maxThreads = 4)(i => Task(i * 2))
   .toList
   .sync()
-// res4: List[Int] = List(2, 4, 6, 8, 10, 12, 14, 16, 18, 20)
 ```
 
 ### `.parForeach`
 Fire-and-forget parallel processing for side-effects (no allocation of results).
 
-```scala
+```scala mdoc
 import java.util.concurrent.atomic.AtomicLong
 import rapid.Task
 
 val sum = new AtomicLong(0)
-// sum: AtomicLong = 5050
 
 Stream.emits(1 to 100)
   .parForeach(threads = 8) { i =>
@@ -164,23 +142,20 @@ Stream.emits(1 to 100)
   .sync()
 
 sum.get() // Sum of 1..100
-// res6: Long = 5050L
 ```
 
 ### `.parFold`
 Parallel reduction with per-thread accumulation and final merge.
 
-```scala
+```scala mdoc
 val streamResult = Stream.emits(1 to 100)
   .parFold(0L, threads = 8)(
     (acc, i) => Task.pure(acc + i),
     _ + _
   )
   .sync()
-// streamResult: Long = 5050L
 
 streamResult // 5050
-// res7: Long = 5050L
 ```
 
 ---
@@ -189,33 +164,25 @@ streamResult // 5050
 `ParallelStream[T, R]` lets you control how elements are processed in parallel with a _forge_ function:
 `T => Task[Option[R]]`. Results are ordered by input index and `None` values are dropped.
 
-```scala
+```scala mdoc
 import rapid.{Stream, ParallelStream, Task}
 
 val base = Stream.emits(1 to 10)
-// base: Stream[Int] = rapid.Stream@1ae2ead7
 val ps   = ParallelStream(
   stream = base,
   forge  = (i: Int) => Task.pure(if (i % 2 == 0) Some(i * 10) else None),
   maxThreads = 8,
   maxBuffer  = 100000
 )
-// ps: ParallelStream[Int, Int] = ParallelStream(
-//   stream = rapid.Stream@1ae2ead7,
-//   forge = repl.MdocSession$MdocApp$$anonfun$12@7fa96451,
-//   maxThreads = 8,
-//   maxBuffer = 100000
-// )
 
 val out = ps.toList.sync() // List(20, 40, 60, 80, 100)
-// out: List[Int] = List(20, 40, 60, 80, 100)
 ```
 
 You can `collect` after the forge to transform only kept values:
 
-```scala
+```scala mdoc
 val doubledEvens = ps.collect { case x if x % 40 == 0 => x / 20 }.toList.sync()
-// doubledEvens: List[Int] = List(2, 4)
+// List(2, 4, 6, 8, 10) => filtered by collect and transformed
 ```
 
 ---
@@ -223,18 +190,16 @@ val doubledEvens = ps.collect { case x if x % 40 == 0 => x / 20 }.toList.sync()
 ## Error Handling
 `Task` failures raise exceptions. Use `attempt` to capture errors if you prefer explicit handling.
 
-```scala
+```scala mdoc
 val t = Task {
   if (System.currentTimeMillis() % 2L == 0L) "ok"
   else throw new RuntimeException("boom")
 }
-// t: Task[String] = SingleTask(f = <function0>)
 
 t.attempt.sync() match {
   case scala.util.Success(v) => println(s"Success: $v")
   case scala.util.Failure(e) => println(s"Error: ${e.getMessage}")
 }
-// Error: boom
 ```
 
 ---

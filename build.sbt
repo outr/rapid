@@ -127,3 +127,14 @@ lazy val benchmark = project.in(file("benchmark"))
       "dev.zio" %% "zio" % "2.0.15"
     )
   )
+
+lazy val docs = project
+  .in(file("documentation"))
+  .dependsOn(core.jvm, scribe.jvm, cats.jvm, test.jvm)
+  .enablePlugins(MdocPlugin)
+  .settings(
+    mdocVariables := Map(
+      "VERSION" -> version.value
+    ),
+    mdocOut := file(".")
+  )
