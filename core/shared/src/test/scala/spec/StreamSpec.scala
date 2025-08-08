@@ -61,7 +61,7 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
     "use parFast to quickly process with many threads" in {
       val stream = Stream.emits(0L until 1_000_000L)
       val add = new AtomicLong(0L)
-      stream.parFast() { i =>
+      stream.parForeach() { i =>
         add.addAndGet(i)
         Task.unit
       }.sync()
@@ -253,7 +253,7 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val s = Stream.emits(1 to 10000)
       @volatile var processed = 0
       val err = intercept[RuntimeException] {
-        s.parFast(threads = 4) { i =>
+        s.parForeach(threads = 4) { i =>
           if (i == 5000) Task.error(new RuntimeException("boom"))
           else Task { processed += 1 }
         }.sync()

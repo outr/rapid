@@ -12,10 +12,13 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
                                          onError: Throwable => Unit) {
   private val pullTask: Task[Pull[T]] = Stream.task(stream.stream)
   private val workQueue = new BoundedMPMCQueue[(T, Int)](stream.maxBuffer)
-  private val readyQueue = new ConcurrentLinkedQueue[(Int, Option[R])]()
+  private val readyQueue = new ConcurrentLinkedQueue[ReadyCell]()
   @volatile private var _total = -1
   @volatile private var failure: Option[Throwable] = None
   private val processedCount = new AtomicInteger(0)
+
+  private final class ReadyCell(val index: Int, val value: AnyRef)
+  private val NullSentinel: AnyRef = new Object()
 
   // feed producer
   pullTask.map { pull =>
@@ -85,13 +88,16 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
         else {
           workQueue.dequeue().foreach { case (t, index) =>
             try {
-              val result = stream.forge(t).sync()
-              readyQueue.offer((index, result))
+              val opt = stream.forge(t).sync()
+              val v: AnyRef = opt match {
+                case Some(r) => r.asInstanceOf[AnyRef]
+                case None => NullSentinel
+              }
+              readyQueue.offer(new ReadyCell(index, v))
               processedCount.incrementAndGet()
               backoff = 1
             } catch {
-              case th: Throwable =>
-                failure = Some(th)
+              case th: Throwable => failure = Some(th)
             }
           }
           if (_total != -1 && processedCount.get() >= _total) ()
@@ -117,41 +123,38 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
 
   // final ordering fiber (counts only Some, propagates failure)
   Task {
-    val buffer = mutable.HashMap.empty[Int, Option[R]]
+    val buffer = new java.util.HashMap[Int, AnyRef]()
     var expected = 0
     var delivered = 0
     var backoff = 1
 
-    def done =
+    def done: Boolean =
       _total != -1 && expected >= _total
 
     while (failure.isEmpty && !done) {
       val polled = readyQueue.poll()
       if (polled != null) {
-        val (idx, res) = polled
-        buffer.put(idx, res)
+        buffer.put(polled.index, polled.value)
         backoff = 1
       } else {
         if (backoff < 1024) {
           backoff = backoff << 1
-          Thread.onSpinWait()
+          java.lang.Thread.onSpinWait()
+        } else {
+          java.util.concurrent.locks.LockSupport.parkNanos(1_000L)
         }
-        else java.util.concurrent.locks.LockSupport.parkNanos(1_000L)
       }
 
-      var found = buffer.get(expected)
-      while (failure.isEmpty && found.isDefined) {
-        found.get match {
-          case Some(v) =>
-            handle(v)
-            delivered += 1
-          case None =>
-            ()
+      var present = buffer.get(expected)
+      while (failure.isEmpty && present != null) {
+        if (present ne NullSentinel) {
+          handle(present.asInstanceOf[R])
+          delivered += 1
         }
         buffer.remove(expected)
         expected += 1
         backoff = 1
-        found = buffer.get(expected)
+        present = buffer.get(expected)
       }
     }
 

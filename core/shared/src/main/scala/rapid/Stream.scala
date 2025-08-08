@@ -863,8 +863,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @tparam R the supertype of the stream's element type
    * @return a `Task[Unit]` that completes when all elements are processed, or fails on the first error
    */
-  def parFast[R >: Return](threads: Int = ParallelStream.DefaultMaxThreads)
-                          (forge: Forge[R, Unit]): Task[Unit] = Task.defer {
+  def parForeach[R >: Return](threads: Int = ParallelStream.DefaultMaxThreads)
+                             (forge: Forge[R, Unit]): Task[Unit] = Task.defer {
     val pull = task.sync()
     @volatile var throwable = Option.empty[Throwable]
 
@@ -890,6 +890,33 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
 
     tasks.tasksPar.map { _ =>
       throwable.foreach(throw _)
+    }
+  }
+
+  def parFold[T](initial: T,
+                 threads: Int = ParallelStream.DefaultMaxThreads)
+                (f: (T, Return) => Task[T], merge: (T, T) => T): Task[T] = Task.defer {
+    val cells = new ConcurrentLinkedQueue[Holder[T]]()
+    val local = new ThreadLocal[Holder[T]] {
+      override def initialValue(): Holder[T] = {
+        val c = new Holder[T](initial)
+        cells.add(c)
+        c
+      }
+    }
+
+    parForeach(threads) { r =>
+      Task {
+        val c = local.get()
+        c.value = f(c.value, r).sync()
+      }
+    }.map { _ =>
+      var acc = initial
+      val it = cells.iterator()
+      while (it.hasNext) {
+        acc = merge(acc, it.next().value)
+      }
+      acc
     }
   }
 }

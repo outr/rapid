@@ -9,6 +9,7 @@ import rapid.cats._
 
 import scala.concurrent.duration._
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 @BenchmarkMode(Array(Mode.Throughput))
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -38,7 +39,7 @@ class StreamBenchmark {
 
   @Benchmark
   def rapidParallelStreamToList(): List[Int] = {
-    verify(rapidStream.par()(Task.pure).toList.sync())
+    verify(rapidStream.par(32)(Task.pure).toList.sync())
   }
 
   @Benchmark
@@ -68,7 +69,7 @@ class StreamBenchmark {
 
   @Benchmark
   def rapidParallelStreamMap(): List[Int] = {
-    verify(rapidStream.par()(i => Task(i * 2)).toList.sync())
+    verify(rapidStream.par(32)(i => Task(i * 2)).toList.sync())
   }
 
   @Benchmark
@@ -79,5 +80,54 @@ class StreamBenchmark {
   @Benchmark
   def fs2ParallelStreamMap(): List[Int] = {
     verify(fs2Stream.parEvalMap(32)(i => IO(i * 2)).compile.toList.unsafeRunSync())
+  }
+
+  @Benchmark
+  def rapidParForeach(): Long = {
+    // Effect-only: side-effect into an AtomicLong, no allocation of results
+    val add = new AtomicLong(0L)
+    rapidStream.parForeach(32) { i =>
+      add.addAndGet(i.toLong)
+      Task.unit
+    }.sync()
+    val s = add.get()
+    // Verify correctness: sum(1..size)
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected, s"parForeach sum $s != expected $expected")
+    s
+  }
+
+  @Benchmark
+  def rapidParFoldSum(): Long = {
+    val s = rapidStream
+      .parFold(0L, threads = 32)((acc, r) => Task.pure(acc + r.toLong), _ + _)
+      .sync()
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected, s"parFold sum $s != expected $expected")
+    s
+  }
+
+  @Benchmark
+  def rapidParallelStreamFoldSum(): Long = {
+    val s = rapidStream
+      .par(maxThreads = 32) { i => Task.pure(i) }
+      .fold(0L) { (acc, r) => Task.pure(acc + r.toLong) }
+      .sync()
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected, s"parallelStreamFold sum $s != expected $expected")
+    s
+  }
+
+  @Benchmark
+  def fs2ParEvalMapSum(): Long = {
+    import cats.effect.IO
+    val ref = new java.util.concurrent.atomic.AtomicLong(0L)
+    fs2Stream.parEvalMap(32) { i =>
+      IO { ref.addAndGet(i.toLong) }
+    }.compile.drain.unsafeRunSync()
+    val s = ref.get()
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected)
+    s
   }
 }
