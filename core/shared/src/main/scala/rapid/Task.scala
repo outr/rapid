@@ -43,12 +43,11 @@ trait Task[+Return] extends Any {
           case _: UnitTask => previous = ()
           case PureTask(value) => previous = value
           case SingleTask(f) => previous = f()
-          case t: Taskable[_] => previous = t.toTask.sync()
+          case t: Taskable[_] => stack.push(t.toTask)
           case ErrorTask(throwable) => throw throwable
           case c: CompletableTask[_] => previous = c.sync()
           case f: Fiber[_] => previous = f.sync()
-          case f: Forge[_, _] =>
-            stack.push(f.asInstanceOf[Forge[Any, Any]](previous))
+          case f: Forge[_, _] => stack.push(f.asInstanceOf[Forge[Any, Any]](previous))
           case FlatMapTask(source, forge) =>
             stack.push(forge)  // Push forge first so that source executes first
             stack.push(source)
@@ -341,7 +340,7 @@ trait Task[+Return] extends Any {
    *
    * @return a new task that returns `Unit` after the existing task completes
    */
-  def unit: Task[Unit] = map(_ => task.UnitTask)
+  def unit: Task[Unit] = map(_ => ())
 
   /**
    * Combines the two tasks to execute at the same time

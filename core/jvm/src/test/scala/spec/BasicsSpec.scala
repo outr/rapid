@@ -6,6 +6,7 @@ import org.scalatest.time.{Minute, Span}
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 import org.scalatest.wordspec.AnyWordSpec
 import rapid._
+import rapid.task.Taskable
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -117,6 +118,12 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val start = System.currentTimeMillis()
       Task.condition(Task.function(System.currentTimeMillis() - start > 500), delay = 25.millis).sync()
       (System.currentTimeMillis() - start) should be > 500L
+    }
+    "verify Taskable works as expected" in {
+      class MyTaskable(value: String) extends Taskable[String] {
+        override def toTask: Task[String] = Task.sleep(100.millis).pure(value)
+      }
+      new MyTaskable("Hello").sync() should be("Hello")
     }
   }
 }
