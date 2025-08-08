@@ -15,14 +15,14 @@ case class ParallelStream[T, R](stream: Stream[T],
   def drain: Task[Unit] =
     Task.flatMap { _ =>
       val c = Task.completable[Unit]
-      compile(_ => (), _ => c.success(()))
+      compile(_ => (), _ => c.success(()), t => c.failure(t))
       c
     }
 
   def count: Task[Int] =
     Task.flatMap { _ =>
       val c = Task.completable[Int]
-      compile(_ => (), c.success)
+      compile(_ => (), c.success, t => c.failure(t))
       c
     }
 
@@ -30,7 +30,7 @@ case class ParallelStream[T, R](stream: Stream[T],
     Task.flatMap { _ =>
       val buf = ListBuffer.empty[R]
       val c = Task.completable[List[R]]
-      compile(buf += _, _ => c.success(buf.toList))
+      compile(buf += _, _ => c.success(buf.toList), t => c.failure(t))
       c
     }
 
@@ -38,12 +38,12 @@ case class ParallelStream[T, R](stream: Stream[T],
     Task.flatMap { _ =>
       var acc = initial
       val c = Task.completable[U]
-      compile(r => acc = f(acc, r).sync(), _ => c.success(acc))
+      compile(r => acc = f(acc, r).sync(), _ => c.success(acc), t => c.failure(t))
       c
     }
 
-  protected def compile(handle: R => Unit, complete: Int => Unit): Unit =
-    ParallelStreamProcessor(this, handle, complete)
+  protected def compile(handle: R => Unit, complete: Int => Unit, onError: Throwable => Unit): Unit =
+    ParallelStreamProcessor(this, handle, complete, onError)
 }
 
 object ParallelStream {

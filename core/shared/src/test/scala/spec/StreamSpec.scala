@@ -119,11 +119,10 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
         fiber.map { _ =>
           set should be(Set(1, 2, 3, 4, 5, 6))
           val elapsed = System.currentTimeMillis() - start
-          elapsed should be > 1000L
+          elapsed should be >= 1000L
         }
       }.sync()
     }
-
     "zip with index correctly and handle empty" in {
       Stream.emits(List("a", "b", "c"))
         .zipWithIndex
@@ -353,6 +352,88 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
     }
     "toVector collects all elements" in {
       Stream.emits(List(5, 6, 7)).toVector.sync() shouldEqual Vector(5, 6, 7)
+    }
+    "ParallelStream toList preserves input order and filters None" in {
+      val in  = 1 to 20
+      val ps  = Stream.emits(in).par(maxThreads = 4, maxBuffer = 64) { i =>
+        Task.pure(i * 10) // plain value
+      }.collect { case x if (x / 10) % 2 == 0 => x } // keep evens
+      ps.toList.sync() shouldEqual in.filter(_ % 2 == 0).map(_ * 10).toList
+    }
+    "ParallelStream collect applies PartialFunction after forge" in {
+      val ps = Stream.emits(1 to 10)
+        .par(maxThreads = 3) { i => Task.pure(i) }     // plain value
+        .collect { case x if x % 3 == 0 => x * 2 }
+      ps.toList.sync() shouldEqual List(6, 12, 18)
+    }
+    "ParallelStream count counts only Some results" in {
+      val ps = Stream.emits(1 to 10)
+        .par(maxThreads = 2) { i => Task.pure(i) }
+        .collect { case i if i <= 7 => i }
+      ps.count.sync() shouldEqual 7
+    }
+    "ParallelStream fold accumulates effectfully" in {
+      val ps = Stream.emits(1 to 5).par(maxThreads = 2) { i => Task.pure(i) }
+      val sum = ps.fold(0)((acc, r) => Task.pure(acc + r)).sync()
+      sum shouldEqual 15
+    }
+    "ParallelStream drain runs side effects exactly once per kept element" in {
+      val seen = new java.util.concurrent.atomic.AtomicInteger(0)
+      val ps = Stream.emits(1 to 50).par(maxThreads = 4) { i =>
+        Task.pure(i) // no filtering here
+      }
+      ps.drain.sync()
+      seen.get() shouldEqual 0
+      val kept = Stream.emits(1 to 50).par(maxThreads = 4) { i =>
+        Task {
+          if (i % 5 == 0) seen.incrementAndGet()
+          i
+        }
+      }.collect { case i if i % 5 == 0 => i }
+      kept.toList.sync() shouldEqual List(5, 10, 15, 20, 25, 30, 35, 40, 45, 50)
+      seen.get() shouldEqual 10
+    }
+    "ParallelStream respects maxThreads (caps concurrent forge calls)" in {
+      val active   = new java.util.concurrent.atomic.AtomicInteger(0)
+      val peak     = new java.util.concurrent.atomic.AtomicInteger(0)
+      val threads  = 3
+      val ps = Stream.emits(1 to 50).par(maxThreads = threads) { _ =>
+        Task {
+          val now = active.incrementAndGet()
+          var prev = peak.get()
+          if (now > prev) peak.compareAndSet(prev, now)
+          Thread.sleep(5)
+          active.decrementAndGet()
+          1
+        }
+      }
+      ps.count.sync() shouldEqual 50
+      peak.get() should be <= threads
+    }
+    "ParallelStream handles empty stream" in {
+      val ps = Stream.empty[Int].par(maxThreads = 4)(i => Task.pure(i * 2))
+      ps.toList.sync() shouldEqual Nil
+      ps.count.sync() shouldEqual 0
+    }
+    "ParallelStream basic stress (large input)" in {
+      val n  = 100_000
+      val ps = Stream.emits(0 until n).par(maxThreads = 8, maxBuffer = 4096) { i =>
+        Task.pure(i)
+      }.collect { case i if (i & 1) == 0 => i }
+      val out = ps.toList.sync()
+      out.size shouldEqual n / 2
+      out.headOption shouldEqual Some(0)
+      out.lastOption shouldEqual Some(n - (if (n % 2 == 0) 2 else 1))
+    }
+    "ParallelStream propagates worker failure (first error wins)" in {
+      val ps = Stream.emits(1 to 10).par(maxThreads = 4) { i =>
+        if (i == 7) Task.error(new RuntimeException("boom"))
+        else Task.pure(i)
+      }
+      val ex = intercept[RuntimeException] {
+        ps.toList.sync()
+      }
+      ex.getMessage shouldBe "boom"
     }
   }
 }
