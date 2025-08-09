@@ -11,6 +11,13 @@ It provides:
 - A **`Stream`** type for composable, lazy, potentially parallel processing of sequences.
 - A set of **parallel combinators** (`par`, `parForeach`, `parFold`) for scaling workloads across threads.
 
+## Inspiration
+
+This project was born out of a deep curiosity about Virtual Threads and a desire to explore their potential performance compared to existing libraries.
+What began as a mere benchmark swiftly transformed into a profound appreciation for the elegant simplicity and rapidity of this approach.
+From there, the project's direction shifted towards building a library that prioritized practical execution models over purely effect-free semantics.
+That’s why Rapid lets you run tasks in a straightforward, blocking, single-threaded way—or seamlessly kick them into multi-threaded parallel execution when performance demands it.
+
 ## Features
 - **Low overhead** — avoids unnecessary allocations, deep call stacks, and hidden costs.
 - **Parallel-first** — easy to switch from sequential to parallel execution.
