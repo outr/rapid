@@ -36,22 +36,22 @@ Take a look at the benchmarks to see how well it performs compared to the altern
 
 ### Core
 ```scala
-libraryDependencies += "com.outr" %% "rapid-core" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-core" % "0.19.0"
 ```
 
 ### Scribe (Effects for Logging)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-scribe" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-scribe" % "0.19.0"
 ```
 
 ### Test (Test features for running Task effects in ScalaTest)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-test" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-test" % "0.19.0"
 ```
 
 ### Cats (Interoperability with Cats-Effect)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-cats" % "0.18.0"
+libraryDependencies += "com.outr" %% "rapid-cats" % "0.19.0"
 ```
 
 ---
@@ -76,9 +76,9 @@ val delayed: Task[String] =
 // delayed: Task[String] = FlatMapTask(
 //   source = FlatMapTask(
 //     source = Unit,
-//     forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f470bb496a8@57d0bc47)
+//     forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f0c6c394680@68e29b01)
 //   ),
-//   forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f470bb509f0@228de1f6)
+//   forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f0c6c395800@6a397ce8)
 // )
 
 hello.sync()
@@ -120,7 +120,7 @@ You can transform it sequentially or in parallel.
 import rapid.{Stream, Task}
 
 val s = Stream.emits(1 to 5)
-// s: Stream[Int] = rapid.Stream@124e093a
+// s: Stream[Int] = rapid.Stream@7b367db5
 
 val doubled = s.map(_ * 2).toList.sync()
 // doubled: List[Int] = List(2, 4, 6, 8, 10)
@@ -204,7 +204,7 @@ streamResult // 5050
 import rapid.{Stream, ParallelStream, Task}
 
 val base = Stream.emits(1 to 10)
-// base: Stream[Int] = rapid.Stream@45395f14
+// base: Stream[Int] = rapid.Stream@3f037788
 val ps   = ParallelStream(
   stream = base,
   forge  = (i: Int) => Task.pure(if (i % 2 == 0) Some(i * 10) else None),
@@ -212,8 +212,8 @@ val ps   = ParallelStream(
   maxBuffer  = 100000
 )
 // ps: ParallelStream[Int, Int] = ParallelStream(
-//   stream = rapid.Stream@45395f14,
-//   forge = repl.MdocSession$MdocApp$$anonfun$12@49945e0f,
+//   stream = rapid.Stream@3f037788,
+//   forge = repl.MdocSession$MdocApp$$anonfun$12@465b1288,
 //   maxThreads = 8,
 //   maxBuffer = 100000
 // )
@@ -245,7 +245,7 @@ t.attempt.sync() match {
   case scala.util.Success(v) => println(s"Success: $v")
   case scala.util.Failure(e) => println(s"Error: ${e.getMessage}")
 }
-// Error: boom
+// Success: ok
 ```
 
 ---
