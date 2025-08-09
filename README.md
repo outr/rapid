@@ -18,6 +18,10 @@ What began as a mere benchmark swiftly transformed into a profound appreciation 
 From there, the project's direction shifted towards building a library that prioritized practical execution models over purely effect-free semantics.
 That’s why Rapid lets you run tasks in a straightforward, blocking, single-threaded way—or seamlessly kick them into multi-threaded parallel execution when performance demands it.
 
+## Benchmarks
+
+Take a look at the benchmarks to see how well it performs compared to the alternatives: https://github.com/outr/rapid/wiki/Benchmarks
+
 ## Features
 - **Low overhead** — avoids unnecessary allocations, deep call stacks, and hidden costs.
 - **Parallel-first** — easy to switch from sequential to parallel execution.
@@ -72,9 +76,9 @@ val delayed: Task[String] =
 // delayed: Task[String] = FlatMapTask(
 //   source = FlatMapTask(
 //     source = Unit,
-//     forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f3ab7b406a8@4bb17cea)
+//     forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f470bb496a8@57d0bc47)
 //   ),
-//   forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f3ab7b41828@63bc5f3e)
+//   forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f470bb509f0@228de1f6)
 // )
 
 hello.sync()
@@ -116,7 +120,7 @@ You can transform it sequentially or in parallel.
 import rapid.{Stream, Task}
 
 val s = Stream.emits(1 to 5)
-// s: Stream[Int] = rapid.Stream@a89229b
+// s: Stream[Int] = rapid.Stream@124e093a
 
 val doubled = s.map(_ * 2).toList.sync()
 // doubled: List[Int] = List(2, 4, 6, 8, 10)
@@ -200,7 +204,7 @@ streamResult // 5050
 import rapid.{Stream, ParallelStream, Task}
 
 val base = Stream.emits(1 to 10)
-// base: Stream[Int] = rapid.Stream@4709ec9b
+// base: Stream[Int] = rapid.Stream@45395f14
 val ps   = ParallelStream(
   stream = base,
   forge  = (i: Int) => Task.pure(if (i % 2 == 0) Some(i * 10) else None),
@@ -208,8 +212,8 @@ val ps   = ParallelStream(
   maxBuffer  = 100000
 )
 // ps: ParallelStream[Int, Int] = ParallelStream(
-//   stream = rapid.Stream@4709ec9b,
-//   forge = repl.MdocSession$MdocApp$$anonfun$12@79e465eb,
+//   stream = rapid.Stream@45395f14,
+//   forge = repl.MdocSession$MdocApp$$anonfun$12@49945e0f,
 //   maxThreads = 8,
 //   maxBuffer = 100000
 // )

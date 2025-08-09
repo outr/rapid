@@ -18,6 +18,10 @@ What began as a mere benchmark swiftly transformed into a profound appreciation 
 From there, the project's direction shifted towards building a library that prioritized practical execution models over purely effect-free semantics.
 That’s why Rapid lets you run tasks in a straightforward, blocking, single-threaded way—or seamlessly kick them into multi-threaded parallel execution when performance demands it.
 
+## Benchmarks
+
+Take a look at the benchmarks to see how well it performs compared to the alternatives: https://github.com/outr/rapid/wiki/Benchmarks
+
 ## Features
 - **Low overhead** — avoids unnecessary allocations, deep call stacks, and hidden costs.
 - **Parallel-first** — easy to switch from sequential to parallel execution.
