@@ -684,6 +684,45 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    */
   def ++[T >: Return](that: => Stream[T]): Stream[T] = append(that)
 
+  /** Run `fin` exactly once when the stream terminates (success, empty) or is short-circuited by the consumer. */
+  def onFinalize(fin: Task[Unit]): Stream[Return] = new Stream[Return](
+    task.map { pullR =>
+      val fired = new java.util.concurrent.atomic.AtomicBoolean(false)
+      new Pull[Return] {
+        override def pull(): Option[Return] = {
+          try {
+            val next = pullR.pull()
+            if (next.isEmpty && fired.compareAndSet(false, true)) {
+              fin.handleError(_ => Task.unit).sync()
+            }
+            next
+          } catch {
+            case t: Throwable =>
+              if (fired.compareAndSet(false, true)) {
+                fin.handleError(_ => Task.unit).sync()
+              }
+              throw t
+          }
+        }
+      }
+    }
+  )
+
+  /** Run `fin(t)` if the pull throws; useful for logging/cleanup on error. */
+  def onErrorFinalize(fin: Throwable => Task[Unit]): Stream[Return] = new Stream[Return](
+    task.map { pullR =>
+      new Pull[Return] {
+        override def pull(): Option[Return] =
+          try pullR.pull()
+          catch {
+            case t: Throwable =>
+              fin(t).handleError(_ => Task.unit).sync()
+              throw t
+          }
+      }
+    }
+  )
+
   /**
    * Drains the stream and fully evaluates it.
    */
@@ -934,6 +973,49 @@ object Stream {
    */
   def apply[Return](values: Return*): Stream[Return] = emits(values)
 
+  /** Bracketed acquisition/usage/release for resources that back a Stream. */
+  def using[R, A](acquire: Task[R])(use: R => Stream[A])(release: R => Task[Unit]): Stream[A] =
+    new Stream[A](
+      Task {
+        // Lazily acquire on first pull; guarantee single release.
+        val state = new java.util.concurrent.atomic.AtomicReference[Option[(R, Pull[A])]](None)
+        val released = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+        def ensureRelease(r: R): Unit =
+          if (released.compareAndSet(false, true))
+            release(r).handleError(_ => Task.unit).sync()
+
+        new Pull[A] {
+          override def pull(): Option[A] = {
+            val (r, p) = state.get() match {
+              case Some((r0, p0)) => (r0, p0)
+              case None =>
+                val r0 = acquire.sync()
+                val p0 = use(r0).task.sync()
+                state.set(Some((r0, p0)))
+                (r0, p0)
+            }
+            try {
+              val n = p.pull()
+              if (n.isEmpty) ensureRelease(r)
+              n
+            } catch {
+              case t: Throwable =>
+                ensureRelease(r)
+                throw t
+            }
+          }
+        }
+      }
+    )
+
+  /** Managed-from-iterator with explicit release hook (always runs on termination/error). */
+  def fromIteratorManaged[A](mk: Task[Iterator[A]])(release: Iterator[A] => Task[Unit]): Stream[A] = {
+    using(mk) { it =>
+      apply(Task.pure(Pull.fromIterator(it)))
+    }(release)
+  }
+
   /**
    * Creates a stream that emits a single value.
    *
@@ -967,7 +1049,10 @@ object Stream {
    * @tparam Return the type of the values
    * @return a new stream that emits the values in the iterator
    */
-  def fromIterator[Return](iterator: Task[Iterator[Return]]): Stream[Return] = apply(iterator.map(Pull.fromIterator))
+  def fromIterator[Return](iterator: Task[Iterator[Return]]): Stream[Return] = fromIteratorManaged(iterator) {
+    case ac: AutoCloseable => Task(ac.close())
+    case _ => Task.unit
+  }
 
   /**
    * Forces a Task[Stream] into Stream

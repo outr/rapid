@@ -103,5 +103,13 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       println(monitor.report())
       Task.succeed
     }
+    "verify SingleThreadAgent works" in {
+      val sta = SingleThreadAgent("test")(Task.pure(""))
+      sta { _ =>
+        Thread.currentThread().getName
+      }.map { threadName =>
+        threadName should be("test-sta")
+      }.guarantee(sta.dispose())
+    }
   }
 }

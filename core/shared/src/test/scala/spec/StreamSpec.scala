@@ -435,5 +435,14 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       }
       ex.getMessage shouldBe "boom"
     }
+    "verify onFinalize executes properly" in {
+      var finalized = false
+      val s = Stream.emits(1 to 10).onFinalize(Task {
+        finalized = true
+      }).fold(0)((total, i) => Task.pure(total + i))
+      finalized should be(false)
+      s.sync() should be(55)
+      finalized should be(true)
+    }
   }
 }
