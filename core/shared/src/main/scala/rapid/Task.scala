@@ -1,7 +1,7 @@
 package rapid
 
 import rapid.monitor.TaskMonitor
-import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, Taskable, UnitTask}
+import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.tailrec
@@ -31,9 +31,9 @@ trait Task[+Return] extends Any {
     while (!stack.isEmpty) {
       val head = stack.pop()
 
-      Task.monitor.foreach { m =>
+      if (Task.monitor != null) {
         head match {
-          case t: Task[_] => m.start(t)
+          case t: Task[_] => Task.monitor.start(t)
           case _ => // Ignore Forge
         }
       }
@@ -43,6 +43,7 @@ trait Task[+Return] extends Any {
           case _: UnitTask => previous = ()
           case PureTask(value) => previous = value
           case SingleTask(f) => previous = f()
+          case SleepTask(d) => previous = Platform.sleep(d).sync()
           case t: Taskable[_] => stack.push(t.toTask)
           case ErrorTask(throwable) => throw throwable
           case c: CompletableTask[_] => previous = c.sync()
@@ -54,17 +55,17 @@ trait Task[+Return] extends Any {
           case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
         }
 
-        Task.monitor.foreach { m =>
+        if (Task.monitor != null) {
           head match {
-            case t: Task[_] => m.success(t, previous)
+            case t: Task[_] => Task.monitor.success(t, previous)
             case _ => // Ignore Forge
           }
         }
       } catch {
         case throwable: Throwable =>
-          Task.monitor.foreach { m =>
+          if (Task.monitor != null) {
             head match {
-              case t: Task[_] => m.error(t, throwable)
+              case t: Task[_] => Task.monitor.error(t, throwable)
               case _ => // Ignore Forge
             }
           }
@@ -87,9 +88,15 @@ trait Task[+Return] extends Any {
    */
   def start: Task[Fiber[Return]] = Task {
     val f = Platform.createFiber(this)
-    Task.monitor.foreach(_.fiberCreated(f, this))
+    if (Task.monitor != null) Task.monitor.fiberCreated(f, this)
     f
   }
+
+  /**
+   * Starts the task ignoring the result. This can be somewhat faster than start
+   * as the fiber is dropped.
+   */
+  def startAndForget(): Unit = Platform.fireAndForget(this)
 
   /**
    * Awaits (blocking) the completion of the task and returns the result.
@@ -115,7 +122,7 @@ trait Task[+Return] extends Any {
    */
   def error[T](throwable: Throwable): Task[T] = next {
     val e = ErrorTask[T](throwable)
-    Task.monitor.foreach(_.created(e))
+    if (Task.monitor != null) Task.monitor.created(e)
     e
   }
 
@@ -152,7 +159,7 @@ trait Task[+Return] extends Any {
   def map[T](f: Return => T): Task[T] = this match {
     case PureTask(value) => PureTask(f(value))  // Directly apply transformation
     case SingleTask(g) => SingleTask(() => f(g()))  // Apply transformation inline
-    case _ => FlatMapTask(this, Forge[Return, T](i => Task(f(i))))
+    case _ => FlatMapTask(this, Forge[Return, T](i => PureTask(f(i))))
   }
 
 
@@ -165,7 +172,7 @@ trait Task[+Return] extends Any {
    */
   def pure[T](value: T): Task[T] = next {
     val t = PureTask(value)
-    Task.monitor.foreach(_.created(t))
+    if (Task.monitor != null) Task.monitor.created(t)
     t
   }
 
@@ -220,19 +227,17 @@ trait Task[+Return] extends Any {
   def next[T](task: => Task[T]): Task[T] = flatMap(_ => task)
 
   /**
+   * Works like flatTap, but ignores the previous value.
+   */
+  def effect[T](task: => Task[T]): Task[Return] = flatTap(_ => task)
+
+  /**
    * Chains a sleep to the end of this task.
    *
    * @param duration the duration to sleep
    * @return a new task that sleeps for the given duration after the existing task completes
    */
-  def sleep(duration: => FiniteDuration): Task[Return] = flatTap { r =>
-    val millis = duration.toMillis
-    if (millis > 0L) {
-      Task(Thread.sleep(millis))
-    } else {
-      Task.unit
-    }
-  }
+  def sleep(duration: => FiniteDuration): Task[Return] = effect(SleepTask(duration))
 
   /**
    * Convenience functionality wrapping sleep to delay until the timeStamp (in millis).
@@ -265,6 +270,22 @@ trait Task[+Return] extends Any {
       val e = (System.currentTimeMillis() - start) / 1000.0
       r -> e
     }
+  }
+
+  /**
+   * Uses a timer to capture the elapsed time for the execution of the supplied Task. This is useful for multiple
+   * concurrent calls to a block to measure hot spots in performance over time.
+   *
+   * @param timer the timer to use
+   * @param task the task to time
+   * @tparam T the return type
+   */
+  def timed[T](timer: Timer)(task: => Task[T]): Task[T] = Task.defer {
+    val start = System.nanoTime()
+    task.guarantee(Task {
+      val elapsed = System.nanoTime() - start
+      timer._elapsed.addAndGet(elapsed)
+    })
   }
 
   /**
@@ -438,17 +459,17 @@ trait Task[+Return] extends Any {
 }
 
 object Task extends task.UnitTask {
-  var monitor: Option[TaskMonitor] = None
+  var monitor: TaskMonitor = _
 
   def apply[T](f: => T): Task[T] = {
     val t = SingleTask(() => f)
-    Task.monitor.foreach(_.created(t))
+    if (monitor != null) monitor.created(t)
     t
   }
 
   def completable[Return]: CompletableTask[Return] = {
     val c = new CompletableTask[Return]
-    Task.monitor.foreach(_.created(c))
+    if (monitor != null) monitor.created(c)
     c
   }
 }

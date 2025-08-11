@@ -19,6 +19,9 @@ class ManySleepsBenchmark {
   private val tasks = 10_000_000
   private def sleepTime = Random.nextInt(10).seconds
 
+  // Reuse ZIO runtime; creating it is expensive
+  private lazy val zioRuntime = Runtime.default
+
   private def waitForComplete(completed: AtomicInteger): Unit = {
     while (completed.get() != tasks) {
       Thread.sleep(50)
@@ -37,10 +40,9 @@ class ManySleepsBenchmark {
   @Benchmark
   def zioBenchmark(): Unit = {
     val completed = new AtomicInteger(0)
-    val runtime = Runtime.default
     (1 to tasks).foreach { _ =>
       val zio = ZIO.sleep(Duration.fromScala(sleepTime)).map(_ => completed.incrementAndGet())
-      Unsafe.unsafe(implicit u => runtime.unsafe.fork(zio))
+      Unsafe.unsafe(implicit u => zioRuntime.unsafe.fork(zio))
     }
     waitForComplete(completed)
   }

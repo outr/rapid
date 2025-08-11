@@ -17,7 +17,7 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
     val monitor = new StatsTaskMonitor
 
     "set up stats monitor" in {
-      Task.monitor = Option(monitor)
+      Task.monitor = monitor
       Task.succeed
     }
     "handle a simple task" in {

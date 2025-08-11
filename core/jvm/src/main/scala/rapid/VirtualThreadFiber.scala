@@ -15,7 +15,7 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
     .start(() => {
       if (!cancelled) {
         try {
-          result = task.attempt.sync()
+          result = Try(task.sync())
         } catch {
           case _: InterruptedException if cancelled => result = Failure(new CancellationException("Task was cancelled"))
           case t: Throwable => result = Failure(t)
@@ -50,4 +50,13 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
 
 object VirtualThreadFiber {
   private val counter = new AtomicLong(0L)
+
+  def fireAndForget(task: Task[_]): Unit = {
+    Thread
+      .ofVirtual()
+      .name(s"rapid-vt-${counter.incrementAndGet()}")
+      .start(() => {
+        task.sync()
+      })
+  }
 }

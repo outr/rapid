@@ -6,6 +6,7 @@ import scala.util.{Failure, Success, Try}
 
 class CompletableTask[Return] extends Task[Return] {
   @volatile private var _result: Option[Try[Return]] = None
+  @volatile private var _callbacks = List.empty[Return => Unit]
 
   def isComplete: Boolean = _result.nonEmpty
 
@@ -16,12 +17,17 @@ class CompletableTask[Return] extends Task[Return] {
 
   def success(result: Return): Unit = synchronized {
     this._result = Some(Success(result))
+    _callbacks.foreach(_(result))
     notifyAll()
   }
 
   def failure(throwable: Throwable): Unit = synchronized {
     this._result = Some(Failure(throwable))
     notifyAll()
+  }
+
+  def onSuccess(f: Return => Unit): Unit = synchronized {
+    _callbacks = f :: _callbacks
   }
 
   override def sync(): Return = synchronized {

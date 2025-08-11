@@ -18,6 +18,9 @@ class OverheadBenchmark {
 
   private def simpleComputation: Int = math.round(math.sqrt(163.0)).toInt
 
+  // Reuse ZIO runtime; creating it is expensive
+  private lazy val zioRuntime = Runtime.default
+
   private def verify(name: String, result: Int): Unit = {
     if (result != expected) {
       println(s"$name - Expected: $expected, Got: $result")
@@ -38,8 +41,7 @@ class OverheadBenchmark {
     val zio = (1 to iterations).foldLeft(ZIO.succeed(0))((t, i) => t.flatMap { total =>
       ZIO.succeed(total + simpleComputation)
     })
-    val runtime = Runtime.default
-    val result = Unsafe.unsafe(implicit u => runtime.unsafe.run(zio).getOrThrowFiberFailure())
+    val result = Unsafe.unsafe(implicit u => zioRuntime.unsafe.run(zio).getOrThrowFiberFailure())
     verify("ZIO", result)
   }
 
