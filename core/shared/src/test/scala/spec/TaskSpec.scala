@@ -11,7 +11,7 @@ import scala.concurrent.duration._
 class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
 
-  "Task" should {
+  "Tasks" should {
     "execute a simple task" in {
       val task = Task { 5 * 5 }
       task.await() shouldEqual 25

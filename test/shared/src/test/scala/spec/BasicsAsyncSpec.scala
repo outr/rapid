@@ -111,5 +111,18 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
         threadName should be("test-sta")
       }.guarantee(sta.dispose())
     }
+    "handle condition" in {
+      var counter = 0
+      Task.condition(Task {
+        counter += 1
+        if (counter >= 5) {
+          true
+        } else {
+          false
+        }
+      }, delay = 25.millis).function {
+        counter should be(5)
+      }
+    }
   }
 }
