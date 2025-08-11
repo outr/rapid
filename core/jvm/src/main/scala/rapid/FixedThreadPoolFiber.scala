@@ -12,7 +12,7 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
   private val future = FixedThreadPoolFiber.create(task)
 
   override def sync(): Return = {
-    future.get()
+    result = Try(future.get())
     if (result == null && cancelled) {
       result = Failure(new CancellationException())
     }
