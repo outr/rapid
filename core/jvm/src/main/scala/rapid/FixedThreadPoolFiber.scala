@@ -37,18 +37,20 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
 }
 
 object FixedThreadPoolFiber {
-  private lazy val threadFactory = new ThreadFactory {
+  /*private lazy val threadFactory = new ThreadFactory {
     override def newThread(r: Runnable): Thread = {
       val thread = new Thread(r)
       thread.setName(s"rapid-ft-${FixedThreadPoolFiber.counter.incrementAndGet()}")
       thread.setDaemon(true)
       thread
     }
-  }
-  private lazy val executor = Executors.newFixedThreadPool(
+  }*/
+  private lazy val threadFactory = Thread.ofVirtual().factory()
+  private lazy val executor = Executors.newThreadPerTaskExecutor(threadFactory)
+  /*private lazy val executor = Executors.newFixedThreadPool(
     math.max(Runtime.getRuntime.availableProcessors(), 4),
     threadFactory
-  )
+  )*/
   private val counter = new AtomicLong(0L)
 
   private def create[Return](task: Task[Return]): Future[Return] = executor.submit(() => task.sync())
