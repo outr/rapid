@@ -47,6 +47,8 @@ ThisBuild / Test / testOptions += Tests.Argument("-oDF")
 
 ThisBuild / Test / parallelExecution := false
 
+ThisBuild / Test / logBuffered := false
+
 val scribeVersion: String = "3.17.0"
 
 /// Testing and Benchmarking Libraries
