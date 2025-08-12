@@ -66,8 +66,8 @@ class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       }.sync()
     }
     "process a longer list of tasks with delays in parallel" in {
-      (0 until 10_000).map(i => Task.sleep(25.millis).map(_ => i * 2)).tasksPar.map { list =>
-        list.sum should be(99990000)
+      (0 until 100_000).map(i => Task.sleep(500.millis).map(_ => i * 2)).tasksPar.map { list =>
+        list.sum should be(1409965408)
       }.sync()
     }
     "parallel process a list of zero tasks" in {

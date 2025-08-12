@@ -81,7 +81,7 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       }
     }
     "create a recursive flatMap method that runs asynchronously" in {
-      val max = 1_000_000
+      val max = 10_000_000
       val counter = new AtomicInteger(0)
       def count(i: Int): Task[Int] = if (i >= max) {
         Task.pure(i)
