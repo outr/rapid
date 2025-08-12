@@ -124,5 +124,33 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
         counter should be(5)
       }
     }
+    "verify start and forget functionality with effect" in {
+      var condition = false
+      Task.sleep(100.millis).effect(Task {
+        condition = true
+      }).startAndForget()
+      Task.condition(Task.function(condition), delay = 25.millis).function {
+        condition should be(true)
+      }
+    }
+    "verify timed works properly" in {
+      val timer = Timer()
+      val timed = Task.timed(timer) {
+        Task.sleep(25.millis)
+      }
+      (0 until 10).map(_ => timed).tasksPar.function {
+        timer.elapsedMillis should be >= 250L
+        timer.elapsedMillis should be <= 300L
+      }
+    }
+    "verify CompletableTask.onSuccess" in {
+      var text = ""
+      val completable = Task.completable[String]
+      completable.onSuccess { s =>
+        text = s
+      }
+      completable.success("Test")
+      text should be("Test")
+    }
   }
 }
