@@ -13,6 +13,7 @@ class FiberWaitingSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
 
   "Fiber waiting" should {
     "await with a timeout" in {
+      println("f1")
       val task = Task {
         Thread.sleep(1000); 42
       }
@@ -21,6 +22,7 @@ class FiberWaitingSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       fiber.await(1500.millis) shouldEqual Some(42)
     }
     "chain fibers together" in {
+      println("f2")
       val start = System.currentTimeMillis()
       Task.sleep(250.millis).start().flatMap { _ =>
         Task.sleep(250.millis).start().flatMap { _ =>
@@ -28,6 +30,7 @@ class FiberWaitingSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
         }
       }.sync()
       val elapsed = System.currentTimeMillis() - start
+      println("f3")
       elapsed should be >= 750L
     }
   }

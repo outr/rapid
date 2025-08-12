@@ -15,12 +15,14 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
 
   "Basics" should {
     "handle a simple task" in {
+      println("b1")
       val i = Task {
         5 * 5
       }
       i.await() should be(25)
     }
     "handle a simple task mapping" in {
+      println("b2")
       val i = Task {
         5 * 5
       }
@@ -30,6 +32,7 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       s.await() should be("Value: 25")
     }
     "handle flat mapping" in {
+      println("b3")
       val task = (1 to 10).foldLeft(Task(0))((t, i) => t.flatMap { total =>
         Task(total + i)
       })
@@ -69,6 +72,7 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       list.tasks.sync() should be(List("One", "Two", "Three"))
     }
     "verify a singleton task works properly sequentially" in {
+      println("b4")
       val counter = new AtomicInteger(0)
       val task = Task {
         counter.incrementAndGet()
@@ -106,6 +110,7 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       verify.sync()
     }
     "verify the same task is functionally evaluated" in {
+      println("b5")
       val task = Task(System.currentTimeMillis()).map(_ / 1000.0)
       val now = System.currentTimeMillis() / 1000.0
       task.sync() shouldBe >=(now)
@@ -115,14 +120,17 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       task.sync() shouldBe >=(later)
     }
     "verify condition actually delays properly" in {
+      println("b6")
       val start = System.currentTimeMillis()
       Task.condition(Task.function(System.currentTimeMillis() - start > 500), delay = 25.millis).sync()
       (System.currentTimeMillis() - start) should be > 500L
     }
     "verify Taskable works as expected" in {
+      println("b7")
       class MyTaskable(value: String) extends Taskable[String] {
         override def toTask: Task[String] = Task.sleep(100.millis).pure(value)
       }
+      println("b8")
       new MyTaskable("Hello").sync() should be("Hello")
     }
   }
