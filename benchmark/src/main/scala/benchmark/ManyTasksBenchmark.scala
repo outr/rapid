@@ -29,6 +29,7 @@ class ManyTasksBenchmark {
       i += 1
     }
     latch.await()
+    assert(i == tasks)
   }
 
   @Benchmark
@@ -41,6 +42,7 @@ class ManyTasksBenchmark {
       i += 1
     }
     latch.await()
+    assert(i == tasks)
   }
 
   @Benchmark
@@ -52,5 +54,6 @@ class ManyTasksBenchmark {
       i += 1
     }
     latch.await()
+    assert(i == tasks)
   }
 }
