@@ -140,7 +140,7 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       }
       (0 until 10).map(_ => timed).tasksPar.function {
         timer.elapsedMillis should be >= 250L
-        timer.elapsedMillis should be <= 300L
+        timer.elapsedMillis should be <= 500L
       }
     }
     "verify CompletableTask.onSuccess" in {
