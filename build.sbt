@@ -45,6 +45,8 @@ ThisBuild / outputStrategy := Some(StdoutOutput)
 
 ThisBuild / Test / testOptions += Tests.Argument("-oDF")
 
+ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "30", "1")
+
 ThisBuild / Test / parallelExecution := false
 
 ThisBuild / Test / logBuffered := false
