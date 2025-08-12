@@ -8,3 +8,7 @@ target/
 /.idea/
 /.bsp/
 /benchmark/benchmarks.json
+/project/.bloop
+/project/project
+.metals/
+metals.sbt
