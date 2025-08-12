@@ -14,5 +14,5 @@ trait RapidPlatform {
 
   def fireAndForget(task: Task[_]): Unit
 
-  def sleep(duration: FiniteDuration): CompletableTask[Unit]
+  def sleep(duration: FiniteDuration): Task[Unit]
 }
