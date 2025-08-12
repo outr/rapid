@@ -36,22 +36,22 @@ Take a look at the benchmarks to see how well it performs compared to the altern
 
 ### Core
 ```scala
-libraryDependencies += "com.outr" %% "rapid-core" % "0.19.0"
+libraryDependencies += "com.outr" %% "rapid-core" % "1.0.0"
 ```
 
 ### Scribe (Effects for Logging)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-scribe" % "0.19.0"
+libraryDependencies += "com.outr" %% "rapid-scribe" % "1.0.0"
 ```
 
 ### Test (Test features for running Task effects in ScalaTest)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-test" % "0.19.0"
+libraryDependencies += "com.outr" %% "rapid-test" % "1.0.0"
 ```
 
 ### Cats (Interoperability with Cats-Effect)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-cats" % "0.19.0"
+libraryDependencies += "com.outr" %% "rapid-cats" % "1.0.0"
 ```
 
 ---
@@ -69,16 +69,18 @@ import scala.concurrent.duration._
 val hello: Task[Unit] = Task {
   println("Hello, Rapid!")
 }
-// hello: Task[Unit] = SingleTask(f = <function0>)
+// hello: Task[Unit] = SingleTask(
+//   f = repl.MdocSession$MdocApp$$Lambda/0x000000006250c000@6b0da5d0
+// )
 
 val delayed: Task[String] =
   Task.sleep(500.millis).map(_ => "Done!")
 // delayed: Task[String] = FlatMapTask(
 //   source = FlatMapTask(
 //     source = Unit,
-//     forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f0c6c394680@68e29b01)
+//     forge = FunctionForge(f = rapid.Task$$Lambda/0x000000006250b118@31871142)
 //   ),
-//   forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f0c6c395800@6a397ce8)
+//   forge = FunctionForge(f = rapid.Task$$Lambda/0x000000006250e770@5365c76d)
 // )
 
 hello.sync()
@@ -100,7 +102,7 @@ val fiber = Task {
   Thread.sleep(1000)
   "Completed!"
 }.start()
-// fiber: rapid.Fiber[String] = Fiber(VirtualThreadFiber)
+// fiber: Fiber[String] = Fiber(VirtualThreadFiber)
 
 println("Running in background...")
 // Running in background...
@@ -120,7 +122,7 @@ You can transform it sequentially or in parallel.
 import rapid.{Stream, Task}
 
 val s = Stream.emits(1 to 5)
-// s: Stream[Int] = rapid.Stream@7b367db5
+// s: Stream[Int] = rapid.Stream@62df33d4
 
 val doubled = s.map(_ * 2).toList.sync()
 // doubled: List[Int] = List(2, 4, 6, 8, 10)
@@ -139,7 +141,13 @@ val filtered = s.filter(_ % 2 == 0).toList.sync()     // List(2, 4)
 val taken    = s.take(3).toList.sync()                // List(1, 2, 3)
 // taken: List[Int] = List(1, 2, 3)
 val zipped   = s.zipWithIndex.toList.sync()           // List((1,0), (2,1), ...)
-// zipped: List[(Int, Int)] = List((1, 0), (2, 1), (3, 2), (4, 3), (5, 4))
+// zipped: List[Tuple2[Int, Int]] = List(
+//   (1, 0),
+//   (2, 1),
+//   (3, 2),
+//   (4, 3),
+//   (5, 4)
+// )
 ```
 
 ---
@@ -204,7 +212,7 @@ streamResult // 5050
 import rapid.{Stream, ParallelStream, Task}
 
 val base = Stream.emits(1 to 10)
-// base: Stream[Int] = rapid.Stream@3f037788
+// base: Stream[Int] = rapid.Stream@69dc5692
 val ps   = ParallelStream(
   stream = base,
   forge  = (i: Int) => Task.pure(if (i % 2 == 0) Some(i * 10) else None),
@@ -212,8 +220,8 @@ val ps   = ParallelStream(
   maxBuffer  = 100000
 )
 // ps: ParallelStream[Int, Int] = ParallelStream(
-//   stream = rapid.Stream@3f037788,
-//   forge = repl.MdocSession$MdocApp$$anonfun$12@465b1288,
+//   stream = rapid.Stream@69dc5692,
+//   forge = repl.MdocSession$MdocApp$$anon$25@1d1c36eb,
 //   maxThreads = 8,
 //   maxBuffer = 100000
 // )
@@ -239,13 +247,15 @@ val t = Task {
   if (System.currentTimeMillis() % 2L == 0L) "ok"
   else throw new RuntimeException("boom")
 }
-// t: Task[String] = SingleTask(f = <function0>)
+// t: Task[String] = SingleTask(
+//   f = repl.MdocSession$MdocApp$$Lambda/0x0000000062522fc0@66e0f6ed
+// )
 
 t.attempt.sync() match {
   case scala.util.Success(v) => println(s"Success: $v")
   case scala.util.Failure(e) => println(s"Error: ${e.getMessage}")
 }
-// Success: ok
+// Error: boom
 ```
 
 ---
