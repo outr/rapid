@@ -22,7 +22,7 @@ class BlockableSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers with 
     "cancel a running task" in {
       val start = System.currentTimeMillis()
       val fiber = Task.sleep(1.hour).map(_ => "Never").start()
-      fiber.cancel().map { b =>
+      fiber.cancel.map { b =>
         b should be(true)
         a[CancellationException] should be thrownBy fiber.sync()
         (System.currentTimeMillis() - start) should be < 1000L
