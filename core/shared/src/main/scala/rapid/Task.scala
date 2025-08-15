@@ -50,7 +50,7 @@ trait Task[+Return] extends Any {
           case f: Fiber[_] => previous = f.sync()
           case f: Forge[_, _] => stack.push(f.asInstanceOf[Forge[Any, Any]](previous))
           case FlatMapTask(source, forge) =>
-            stack.push(forge)  // Push forge first so that source executes first
+            stack.push(forge) // Push forge first so that source executes first
             stack.push(source)
           case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
         }
@@ -157,8 +157,8 @@ trait Task[+Return] extends Any {
    * @return a new task with the transformed result
    */
   def map[T](f: Return => T): Task[T] = this match {
-    case PureTask(value) => PureTask(f(value))  // Directly apply transformation
-    case SingleTask(g) => SingleTask(() => f(g()))  // Apply transformation inline
+    case PureTask(value) => PureTask(f(value)) // Directly apply transformation
+    case SingleTask(g) => SingleTask(() => f(g())) // Apply transformation inline
     case _ => FlatMapTask(this, Forge[Return, T](i => PureTask(f(i))))
   }
 
@@ -204,7 +204,7 @@ trait Task[+Return] extends Any {
    * @return a new task with the transformed result
    */
   def flatMap[T](f: Return => Task[T]): Task[T] = this match {
-    case PureTask(value) => f(value)  // Direct execution for pure values
+    case PureTask(value) => f(value) // Direct execution for pure values
     case _ => FlatMapTask(this, Forge(f))
   }
 
@@ -277,7 +277,7 @@ trait Task[+Return] extends Any {
    * concurrent calls to a block to measure hot spots in performance over time.
    *
    * @param timer the timer to use
-   * @param task the task to time
+   * @param task  the task to time
    * @tparam T the return type
    */
   def timed[T](timer: Timer)(task: => Task[T]): Task[T] = Task.defer {
@@ -291,9 +291,9 @@ trait Task[+Return] extends Any {
   /**
    * Sleeps until the condition is met (returns true) or timeout
    *
-   * @param condition the condition that must return true to proceed
-   * @param delay the delay between tests of condition (defaults to 1 second)
-   * @param timeout the timeout before this condition fails (defaults to 24 hours)
+   * @param condition      the condition that must return true to proceed
+   * @param delay          the delay between tests of condition (defaults to 1 second)
+   * @param timeout        the timeout before this condition fails (defaults to 24 hours)
    * @param errorOnTimeout whether to throw a TimeoutException on timeout (defaults to true)
    */
   def condition(condition: Task[Boolean],
@@ -418,28 +418,61 @@ trait Task[+Return] extends Any {
                                     (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
                                      asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
     val completable = Task.completable[C[T]]
-    val total = asIterable(tasks).size
+    val it = asIterable(tasks)
+    val total = it.size
+
     if (total == 0) {
       completable.success(bf.newBuilder(tasks).result())
     } else {
       val array = new Array[T](total)
-      val completed = new AtomicInteger(0)
+      val successed = new AtomicInteger(0)
+      val done = new AtomicBoolean(false)
 
-      def add(r: T, index: Int): Unit = {
-        array(index) = r
-        val finished = completed.incrementAndGet()
-        if (finished == total) {
-          completable.success(bf.newBuilder(tasks).addAll(array).result())
+      // Optionally keep fibers to cancel on failure
+      val fibers = new Array[Fiber[_]](total)
+
+      def tryCompleteSuccess(): Unit = {
+        if (!done.get() && successed.get() == total && done.compareAndSet(false, true)) {
+          // Build in original collection shape
+          val b = bf.newBuilder(tasks)
+          var i = 0
+          while (i < total) {
+            b += array(i); i += 1
+          }
+          completable.success(b.result())
         }
       }
 
-      asIterable(tasks).zipWithIndex.foreach {
-        case (task, index) => task.map { r =>
-          array(index) = r
-          add(r, index)
-        }.start()
+      def failOnce(t: Throwable): Unit = {
+        if (done.compareAndSet(false, true)) {
+          completable.failure(t)
+          // Best-effort cancel remaining
+          var i = 0
+          while (i < fibers.length) {
+            val f = fibers(i)
+            if (f != null) f.cancel.startAndForget()
+            i += 1
+          }
+        }
+      }
+
+      it.zipWithIndex.foreach { case (task, idx) =>
+        // observe success/failure explicitly
+        val observed: Task[Unit] =
+          task.attempt.map {
+            case scala.util.Success(v) =>
+              array(idx) = v
+              val finished = successed.incrementAndGet()
+              if (finished == total) tryCompleteSuccess()
+            case scala.util.Failure(e) =>
+              failOnce(e)
+          }
+
+        // start and keep the fiber to allow cancellation
+        fibers(idx) = observed.start()
       }
     }
+
     completable
   }
 

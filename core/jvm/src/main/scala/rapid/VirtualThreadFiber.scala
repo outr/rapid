@@ -31,7 +31,7 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
     result.get
   }
 
-  override def cancel(): Task[Boolean] = Task {
+  override def cancel: Task[Boolean] = Task {
     if (!cancelled) {
       cancelled = true
       thread.interrupt()

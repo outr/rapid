@@ -11,7 +11,7 @@ trait Fiber[+Return] extends Task[Return] {
   /**
    * Attempts to cancel the Fiber. Returns true if successful.
    */
-  def cancel(): Task[Boolean] = Task.pure(false)
+  def cancel: Task[Boolean] = Task.pure(false)
 
   override def await(): Return = sync()
 

@@ -17,7 +17,7 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
     case e: Throwable => throw e
   }
 
-  override def cancel(): Task[Boolean] = Task {
+  override def cancel: Task[Boolean] = Task {
     if (!cancelled) {
       cancelled = true
       future.cancel(true)
