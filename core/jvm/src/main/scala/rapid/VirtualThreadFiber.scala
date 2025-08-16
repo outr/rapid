@@ -3,7 +3,7 @@ package rapid
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{Failure, Try}
+import scala.util.{Failure, Success, Try}
 
 class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
   @volatile private var result: Try[Return] = _
@@ -42,7 +42,11 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
   }
 
   override def await(duration: FiniteDuration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
-    Option(result).flatMap(_.toOption)
+    Option(result) match {
+      case Some(Success(value)) => Some(value)
+      case Some(Failure(exception)) => throw exception
+      case None => None
+    }
   } else {
     None
   }
