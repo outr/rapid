@@ -12,3 +12,4 @@ target/
 /project/project
 .metals/
 metals.sbt
+/.vscode/
