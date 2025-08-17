@@ -1,5 +1,8 @@
 package benchmark
 
+import rapid.task.TaskCombinators._         // Task.sleep / map / etc.
+import rapid.BlockableTask                  // brings .await extension into scope
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._

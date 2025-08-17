@@ -1,40 +1,50 @@
 package rapid
 
+import rapid.task.{FiberTask, PureTask, CompletableTask}
+import rapid.{Task, TaskLike}
+
 import java.util.concurrent.CompletableFuture
 import scala.annotation.nowarn
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
-trait Fiber[+Return] extends Task[Return] {
-  override def start: Task[Fiber[Return]] = Task.pure(this)
+/**
+ * Represents a computation that can be started and awaited.
+ */
+trait Fiber[+Return] extends TaskLike[Return] {
 
-  /**
-   * Attempts to cancel the Fiber. Returns true if successful.
-   */
-  def cancel: Task[Boolean] = Task.pure(false)
+  /** Returns a Task that completes with this Fiber. */
 
+  /** Attempts to cancel the Fiber. Override if supported. */
+  def cancel: Task[Boolean] = PureTask(() => false)
+
+  /** Await and return the result. */
   override def await(): Return = sync()
 
-  override def toString: String = s"Fiber(${getClass.getSimpleName})"
+  /** Await synchronously (alias for await). */
+  def sync(): Return
 }
 
 object Fiber {
-  @nowarn()
-  def fromFuture[Return](future: Future[Return])(implicit ec: scala.concurrent.ExecutionContext): Fiber[Return] = {
+
+  /** Convert a Scala Future to a Fiber. */
+  @nowarn
+  def fromFuture[Return](future: Future[Return])(implicit ec: ExecutionContext): Fiber[Return] = {
     val completable = Task.completable[Return]
     future.onComplete {
-      case Success(value) => completable.success(value)
+      case Success(value)     => completable.success(value)
       case Failure(exception) => completable.failure(exception)
     }
-    completable.start()
+    FiberTask(completable)
   }
 
+  /** Convert a Java CompletableFuture to a Fiber. */
   def fromFuture[Return](future: CompletableFuture[Return]): Fiber[Return] = {
     val completable = Task.completable[Return]
     future.whenComplete {
       case (_, error) if error != null => completable.failure(error)
-      case (r, _) => completable.success(r)
+      case (result, _)                 => completable.success(result)
     }
-    completable.start()
+    FiberTask(completable)
   }
 }

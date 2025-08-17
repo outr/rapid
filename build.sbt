@@ -1,21 +1,23 @@
-// Scala versions
+// =========================
+// Scala Versions
+// =========================
 val scala213 = "2.13.16"
-
 val scala3 = "3.3.6"
 
 val scala2 = List(scala213)
 val allScalaVersions = scala3 :: scala2
 
-// Variables
-val org: String = "com.outr"
-val projectName: String = "rapid"
-val githubOrg: String = "outr"
-val email: String = "matt@matthicks.com"
-val developerId: String = "darkfrog"
-val developerName: String = "Matt Hicks"
-val developerURL: String = "https://matthicks.com"
+// =========================
+// Project Metadata
+// =========================
+val org = "com.outr"
+val projectName = "rapid"
+val githubOrg = "outr"
+val email = "matt@matthicks.com"
+val developerId = "darkfrog"
+val developerName = "Matt Hicks"
+val developerURL = "https://matthicks.com"
 
-name := projectName
 ThisBuild / organization := org
 ThisBuild / version := "1.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := scala3
@@ -23,122 +25,86 @@ ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
 
 ThisBuild / sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost
-//ThisBuild / publishMavenStyle := true
 ThisBuild / publishTo := sonatypePublishToBundle.value
 ThisBuild / sonatypeProfileName := org
 ThisBuild / licenses := Seq("MIT" -> url(s"https://github.com/$githubOrg/$projectName/blob/master/LICENSE"))
 ThisBuild / sonatypeProjectHosting := Some(xerial.sbt.Sonatype.GitHubHosting(githubOrg, projectName, email))
 ThisBuild / homepage := Some(url(s"https://github.com/$githubOrg/$projectName"))
-ThisBuild / scmInfo := Some(
-  ScmInfo(
-    url(s"https://github.com/$githubOrg/$projectName"),
-    s"scm:git@github.com:$githubOrg/$projectName.git"
-  )
-)
+ThisBuild / scmInfo := Some(ScmInfo(url(s"https://github.com/$githubOrg/$projectName"), s"scm:git@github.com:$githubOrg/$projectName.git"))
 ThisBuild / developers := List(
-  Developer(id=developerId, name=developerName, email=email, url=url(developerURL))
+  Developer(id = developerId, name = developerName, email = email, url = url(developerURL))
 )
 
-ThisBuild / resolvers += Resolver.mavenLocal
+ThisBuild / resolvers ++= Seq(
+  Resolver.mavenLocal,
+  Resolver.sonatypeRepo("public"),
+  "jitpack" at "https://jitpack.io"
+)
 
 ThisBuild / outputStrategy := Some(StdoutOutput)
-
 ThisBuild / Test / testOptions += Tests.Argument("-oDF")
-
 ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "30", "30")
-
 ThisBuild / Test / parallelExecution := false
-
 ThisBuild / Test / logBuffered := false
 
-val scribeVersion: String = "3.17.0"
+// =========================
+// Dependency Versions
+// =========================
+val scribeVersion = "3.17.0"
+val catsVersion = "3.6.3"
+val fs2Version = "3.12.0"
+val scalaTestVersion = "3.2.19"
+val zioVersion = "2.0.15"
+val jmhVersion = "1.37"
 
-/// Testing and Benchmarking Libraries
-
-val catsVersion: String = "3.6.3"
-
-val fs2Version: String = "3.12.0"
-
-val scalaJsMacrotaskVersion: String = "1.1.1"
-
-val scalaTestVersion: String = "3.2.19"
-
-lazy val root = project.in(file("."))
-  .aggregate(core.jvm, scribe.jvm, test.jvm, cats.jvm)
-  .settings(
-    name := projectName,
-    publish := {},
-    publishLocal := {}
-  )
-
-lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
+// =========================
+// Core Project
+// =========================
+lazy val core = crossProject(JVMPlatform)
   .crossType(CrossType.Full)
   .settings(
     name := s"$projectName-core",
     libraryDependencies ++= Seq(
-      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
-    )
-  )
-//  .jsSettings(
-//    libraryDependencies ++= Seq(
-//      "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion,
-//    )
-//  )
-
-lazy val scribe = crossProject(JVMPlatform)
-  .crossType(CrossType.Full)
-  .dependsOn(core)
-  .settings(
-    name := s"$projectName-scribe",
-    libraryDependencies ++= Seq(
-      "com.outr" %%% "scribe" % scribeVersion,
-      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
+      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test,
+      "org.typelevel" %% "cats-effect" % catsVersion,
+      "dev.zio" %% "zio" % zioVersion,
+      "org.openjdk.jmh" % "jmh-core" % jmhVersion,
+      "org.openjdk.jmh" % "jmh-generator-annprocess" % jmhVersion
     )
   )
 
-lazy val test = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
-  .crossType(CrossType.Full)
-  .dependsOn(core)
-  .settings(
-    name := s"$projectName-test",
-    libraryDependencies ++= Seq(
-      "org.scalatest" %%% "scalatest" % scalaTestVersion
-    )
-  )
-
-lazy val cats = crossProject(JVMPlatform) //, JSPlatform)
-  .crossType(CrossType.Full)
-  .dependsOn(core)
-  .settings(
-    name := s"$projectName-cats",
-    libraryDependencies ++= Seq(
-      "org.typelevel" %%% "cats-effect" % catsVersion,
-      "co.fs2" %%% "fs2-core" % fs2Version,
-      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
-    )
-  )
-
+// =========================
+// Benchmark Project
+// =========================
 lazy val benchmark = project.in(file("benchmark"))
   .enablePlugins(JmhPlugin)
-  .dependsOn(core.jvm, cats.jvm)
+  .dependsOn(core.jvm)
   .settings(
     name := s"$projectName-benchmark",
+    scalaVersion := scala3,
+    Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "core" / "shared" / "src" / "main" / "scala",
     libraryDependencies ++= Seq(
-      "org.openjdk.jmh" % "jmh-core" % "1.37",
-      "org.openjdk.jmh" % "jmh-generator-annprocess" % "1.37",
+      "org.openjdk.jmh" % "jmh-core" % jmhVersion,
+      "org.openjdk.jmh" % "jmh-generator-annprocess" % jmhVersion,
       "org.typelevel" %% "cats-effect" % catsVersion,
       "co.fs2" %% "fs2-core" % fs2Version,
-      "dev.zio" %% "zio" % "2.0.15"
-    )
+      "dev.zio" %% "zio" % zioVersion,
+      "org.scalatest" %% "scalatest" % scalaTestVersion % Test
+    ),
+    Compile / javacOptions ++= Seq(
+      "-proc:only",
+      "-processor", "org.openjdk.jmh.generators.BenchmarkProcessor"
+    ),
+    Compile / unmanagedResourceDirectories += (Compile / classDirectory).value / "META-INF"
   )
 
-lazy val docs = project
-  .in(file("documentation"))
-  .dependsOn(core.jvm, scribe.jvm, cats.jvm, test.jvm)
-  .enablePlugins(MdocPlugin)
+// =========================
+// Root Project
+// =========================
+lazy val root = project.in(file("."))
+  .aggregate(core.jvm, benchmark)
   .settings(
-    mdocVariables := Map(
-      "VERSION" -> version.value
-    ),
-    mdocOut := file(".")
+    name := projectName,
+    publish := {},
+    publishLocal := {}
   )

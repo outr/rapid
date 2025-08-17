@@ -1,4 +1,5 @@
 package rapid.ops
+import rapid.task.TaskCombinators._
 
 import rapid._
 

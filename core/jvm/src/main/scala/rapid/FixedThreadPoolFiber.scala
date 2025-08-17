@@ -1,14 +1,14 @@
 package rapid
 
+import java.util.concurrent.{Executors, Future => JFuture, ScheduledExecutorService, ThreadFactory, TimeUnit}
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.{Executors, Future, ScheduledExecutorService, ThreadFactory, TimeUnit}
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
 class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
   @volatile private var cancelled = false
 
-  private val future = FixedThreadPoolFiber.create(task)
+  private val future: JFuture[Return] = FixedThreadPoolFiber.executor.submit(() => task.sync())
 
   override def sync(): Return = try {
     future.get()
@@ -35,9 +35,18 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
     case e: java.util.concurrent.ExecutionException => throw e.getCause
     case e: Throwable => throw e
   }
+
+  // ✅ Correctly implemented TaskLike
+  override def start: TaskLike[Return] = new TaskLike[Return] {
+    def sync(): Return = FixedThreadPoolFiber.this.sync()
+    def await(): Return = FixedThreadPoolFiber.this.await()
+    def start: TaskLike[Return] = this
+  }
 }
 
 object FixedThreadPoolFiber {
+  private val counter = new AtomicLong(0L)
+
   private lazy val threadFactory = new ThreadFactory {
     override def newThread(r: Runnable): Thread = {
       val thread = new Thread(r)
@@ -46,13 +55,13 @@ object FixedThreadPoolFiber {
       thread
     }
   }
-  
-  private lazy val executor = Executors.newFixedThreadPool(
+
+  lazy val executor = Executors.newFixedThreadPool(
     math.max(Runtime.getRuntime.availableProcessors(), 4),
     threadFactory
   )
-  
-  private lazy val scheduledExecutor: ScheduledExecutorService = Executors.newScheduledThreadPool(
+
+  lazy val scheduledExecutor: ScheduledExecutorService = Executors.newScheduledThreadPool(
     math.max(Runtime.getRuntime.availableProcessors() / 2, 2),
     new ThreadFactory {
       override def newThread(r: Runnable): Thread = {
@@ -63,14 +72,9 @@ object FixedThreadPoolFiber {
       }
     }
   )
-  
-  private val counter = new AtomicLong(0L)
-
-  private def create[Return](task: Task[Return]): Future[Return] = executor.submit(() => task.sync())
 
   def fireAndForget[Return](task: Task[Return]): Unit = executor.submit(() => Try(task.sync()))
-  
-  // Shutdown method for cleanup
+
   def shutdown(): Unit = {
     executor.shutdown()
     scheduledExecutor.shutdown()

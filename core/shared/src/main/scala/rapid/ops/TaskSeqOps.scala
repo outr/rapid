@@ -1,17 +1,28 @@
 package rapid.ops
 
 import rapid.Task
-
 import scala.collection.BuildFrom
-import scala.reflect.ClassTag
 
-final case class TaskSeqOps[Return, C[_]](seq: C[Task[Return]]) extends AnyVal {
-  def tasks(implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
-                     asIterable: C[Task[Return]] => Iterable[Task[Return]]): Task[C[Return]] =
-    Task.sequence(seq)
+/** Extra ops for collections of Task[_]. */
+final case class TaskSeqOps[Return, C[X] <: IterableOnce[X]](seq: C[Task[Return]]) extends AnyVal {
 
-  def tasksPar(implicit bf: BuildFrom[C[Task[Return]], Return, C[Return]],
-                        asIterable: C[Task[Return]] => Iterable[Task[Return]],
-                        ct: ClassTag[Return]): Task[C[Return]] =
-    Task.parSequence(seq)
+  /** Sequence tasks, preserving the original collection shape C[_]. */
+  def tasks(implicit
+    bf: BuildFrom[C[Task[Return]], Return, C[Return]]
+  ): Task[C[Return]] =
+    Task.sequence(seq).map { xs =>
+      val b = bf.newBuilder(seq)
+      b ++= xs
+      b.result()
+    }
+
+  /** Parallel sequence, preserving the original collection shape C[_]. */
+  def tasksPar(implicit
+    bf: BuildFrom[C[Task[Return]], Return, C[Return]]
+  ): Task[C[Return]] =
+    Task.parSequence(seq).map { xs =>
+      val b = bf.newBuilder(seq)
+      b ++= xs
+      b.result()
+    }
 }

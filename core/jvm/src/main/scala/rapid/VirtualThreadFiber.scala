@@ -3,7 +3,7 @@ package rapid
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Try}
 
 class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
   @volatile private var result: Try[Return] = _
@@ -17,8 +17,10 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
         try {
           result = Try(task.sync())
         } catch {
-          case _: InterruptedException if cancelled => result = Failure(new CancellationException("Task was cancelled"))
-          case t: Throwable => result = Failure(t)
+          case _: InterruptedException if cancelled =>
+            result = Failure(new CancellationException("Task was cancelled"))
+          case t: Throwable =>
+            result = Failure(t)
         }
       }
     })
@@ -41,14 +43,19 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
     }
   }
 
-  override def await(duration: FiniteDuration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
-    Option(result) match {
-      case Some(Success(value)) => Some(value)
-      case Some(Failure(exception)) => throw exception
-      case None => None
+  override def await(duration: FiniteDuration): Option[Return] = {
+    if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
+      Option(result).flatMap(_.toOption)
+    } else {
+      None
     }
-  } else {
-    None
+  }
+
+  // ✅ Fully implemented TaskLike interface
+  override def start: TaskLike[Return] = new TaskLike[Return] {
+    def sync(): Return = VirtualThreadFiber.this.sync()
+    def await(): Return = VirtualThreadFiber.this.await()
+    def start: TaskLike[Return] = this
   }
 }
 

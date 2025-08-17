@@ -1,5 +1,6 @@
 // ParallelStreamProcessor.scala
 package rapid
+import rapid.task.TaskCombinators._
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import java.util.concurrent.ConcurrentLinkedQueue

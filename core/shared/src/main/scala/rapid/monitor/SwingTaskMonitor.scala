@@ -1,5 +1,7 @@
 package rapid.monitor
 
+import rapid.task.TaskCombinators._
+
 import rapid.{Fiber, Task}
 
 import javax.swing._

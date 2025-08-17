@@ -2,22 +2,23 @@ package rapid
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+import rapid.Task
 
-object Platform extends RapidPlatform {
-  override def executionContext: ExecutionContext = scala.concurrent.ExecutionContext.Implicits.global
+object Platform {
 
-  override def supportsCancel: Boolean = true
+  def fork[A](task: Task[A]): Unit = {
+    val thread = new Thread(new Runnable {
+      def run(): Unit = task.sync()
+    }, s"rapid-fork-${System.nanoTime()}")
 
-  override def createFiber[Return](task: Task[Return]): Fiber[Return] = new VirtualThreadFiber[Return](task)
-
-  override def fireAndForget(task: Task[_]): Unit = VirtualThreadFiber.fireAndForget(task)
-
-  override def sleep(duration: FiniteDuration): Task[Unit] = Task.defer {
-    val millis = duration.toMillis
-    if (millis > 0L) {
-      Task(Thread.sleep(millis))
-    } else {
-      Task.unit
-    }
+    thread.start()
   }
+
+  def sleep(duration: FiniteDuration): Task[Unit] =
+    Task {
+      Thread.sleep(duration.toMillis)
+    }
+
+  // ✅ Required for FutureFiber.scala
+  given executionContext: ExecutionContext = ExecutionContext.global
 }

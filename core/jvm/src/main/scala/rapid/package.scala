@@ -1,6 +1,9 @@
 import scala.concurrent.duration.FiniteDuration
 import scala.language.implicitConversions
 
+import rapid.task.TaskCombinators.given // ✅ required for other extensions
+import rapid.task.TaskCombinators.start // ✅ required specifically for `.start()`
+
 package object rapid extends RapidPackage {
   implicit def fiber2Blockable[Return](fiber: Fiber[Return]): Blockable[Return] =
     fiber.asInstanceOf[Blockable[Return]]

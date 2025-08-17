@@ -1,4 +1,5 @@
 package rapid
+import rapid.task.TaskCombinators.*
 
 import java.io.{BufferedInputStream, File, FileInputStream, InputStream}
 import java.nio.file.Path

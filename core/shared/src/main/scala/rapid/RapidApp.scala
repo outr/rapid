@@ -1,13 +1,17 @@
 package rapid
 
+import rapid.task.TaskCombinators.start
 import scala.util.{Failure, Success, Try}
+import rapid.Task
+import rapid.task.TaskCombinators._  // for `.attempt`, `.flatMap`, etc.
 
 /**
  * Provides convenience functionality for running an application as a Task
  */
 trait RapidApp {
   def main(args: Array[String]): Unit = {
-    run(args.toList).attempt.flatMap(result).sync()
+    // FIXED: Converts Either to Try to match `result` signature
+    run(args.toList).attempt.flatMap(e => result(e.toTry)).sync()
   }
 
   def run(args: List[String]): Task[Unit]

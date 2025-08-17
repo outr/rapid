@@ -1,4 +1,5 @@
 package rapid
+import rapid.task.TaskCombinators.*
 
 trait Repeat[+Return] {
   protected def shouldRepeat[R >: Return](r: R): Boolean
