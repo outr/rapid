@@ -1,7 +1,17 @@
 # Rapid
-[![CI](https://github.com/outr/lightdb/actions/workflows/ci.yml/badge.svg)](https://github.com/outr/lightdb/actions/workflows/ci.yml)
 
-**Rapid** is a high-performance, minimal-overhead effect, concurrency, and streaming library for Scala 2 and 3, designed
+### 🔹 Note on this Fork
+This fork is currently **2 commits ahead of `outr/rapid:master`**.  
+That means it includes extra changes that are not in the upstream repo yet.  
+To verify, run:
+
+```bash
+git fetch upstream
+git log --oneline --decorate --graph upstream/master..HEAD
+```
+We may open a PR upstream in the future, but for now this fork intentionally diverges slightly.
+
+Rapid is a high-performance, minimal-overhead effect, concurrency, and streaming library for Scala 2 and 3, designed
 for scenarios where execution speed and allocation efficiency are critical. Primarily focused around simplicity and
 convenience utilizing Virtual Threads for extremely fast performance.
 
