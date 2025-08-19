@@ -8,9 +8,9 @@ object Platform extends RapidPlatform {
 
   override def supportsCancel: Boolean = true
 
-  override def createFiber[Return](task: Task[Return]): Fiber[Return] = new VirtualThreadFiber[Return](task)
+  override def createFiber[Return](task: Task[Return]): Fiber[Return] = new FixedThreadPoolFiber[Return](task)
 
-  override def fireAndForget(task: Task[_]): Unit = VirtualThreadFiber.fireAndForget(task)
+  override def fireAndForget(task: Task[_]): Unit = FixedThreadPoolFiber.fireAndForget(task)
 
   override def sleep(duration: FiniteDuration): Task[Unit] = Task.defer {
     val millis = duration.toMillis

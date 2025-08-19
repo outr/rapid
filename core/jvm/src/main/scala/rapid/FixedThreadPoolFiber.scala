@@ -1,17 +1,130 @@
 package rapid
 
+import rapid.task._
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.{Executors, Future, ScheduledExecutorService, ThreadFactory, TimeUnit}
+import java.util.concurrent.{Executors, CompletableFuture, ThreadFactory, ThreadPoolExecutor, TimeUnit}
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Try
 
 class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
+  import FixedThreadPoolFiber._
+  
   @volatile private var cancelled = false
-
-  private val future = FixedThreadPoolFiber.create(task)
-
+  private val done = new CompletableFuture[Return]()
+  private[this] val conts = new java.util.ArrayDeque[Any => Task[Any]]()
+  @volatile private[this] var cur: Task[Any] = task.asInstanceOf[Task[Any]]
+  @volatile private[this] var inLoop = false
+  @volatile private[this] var pending = false
+  
+  // Start the fiber
+  schedule()
+  
+  // Single scheduling gateway
+  private[this] def schedule(): Unit = {
+    if (inLoop) { pending = true; return }
+    inLoop = true
+    executor.execute(() => runLoop())
+  }
+  
+  // Unified async callback
+  private[this] def resume(v: Any): Unit = {
+    cur = popCont(v)
+    schedule()
+  }
+  
+  private[this] val kAsync: Either[Throwable, Any] => Unit = {
+    case Right(v) => resume(v)
+    case Left(e) => completeExceptionally(e)
+  }
+  
+  // Trampolined interpreter
+  private[this] def runLoop(): Unit = {
+    var ops = 0
+    try {
+      while ((cur ne null) && !cancelled && !done.isDone) {
+        // Fairness gate
+        if ((ops & 1023) == 0 && ops > 0 && executorQueueNonEmpty()) {
+          pending = true
+          return
+        }
+        
+        cur match {
+          case fm: FlatMapTask[_, _] =>
+            conts.addLast(fm.contAny)
+            cur = fm.source.asInstanceOf[Task[Any]]
+          
+          case UnitTask =>
+            cur = popCont(())
+            
+          case p: PureTask[_] =>
+            cur = popCont(p.value)
+            
+          case s: SingleTask[_] =>
+            try {
+              val v = s.f()
+              cur = popCont(v)
+            } catch {
+              case e: Throwable => completeExceptionally(e); return
+            }
+            
+          case e: ErrorTask[_] =>
+            completeExceptionally(e.throwable); return
+            
+          case c: CompletableTask[_] =>
+            c.onSuccess(v => resume(v))
+            cur = null; return
+            
+          case f: FixedThreadPoolFiber[_] =>
+            f.listenEither(kAsync)
+            cur = null; return
+            
+          case SleepTask(d) =>
+            Timer.after(d.length, d.unit)(() => resume(()))
+            cur = null; return
+            
+          case t: Taskable[_] =>
+            cur = t.toTask.asInstanceOf[Task[Any]]
+            
+          case f: Forge[_, _] =>
+            // Apply forge to previous value - this should have been handled by FlatMapTask
+            throw new IllegalStateException(s"Unexpected Forge in interpreter: $f")
+            
+          case unknown =>
+            System.err.println(s"[RUNLOOP] Fallback hit: ${unknown.getClass.getName} -> $unknown")
+            throw new IllegalStateException(s"Unexpected Task node in hot loop: $unknown")
+        }
+        ops += 1
+      }
+      if ((cur eq null) && !done.isDone && conts.isEmpty) complete(())
+    } finally {
+      inLoop = false
+      if (pending || (cur ne null)) { pending = false; schedule() }
+    }
+  }
+  
+  private[this] def popCont(value: Any): Task[Any] = {
+    val cont = conts.pollLast()
+    if (cont ne null) cont(value) else { complete(value); null }
+  }
+  
+  private[this] def complete(value: Any): Unit = done.complete(value.asInstanceOf[Return])
+  private[this] def completeExceptionally(error: Throwable): Unit = done.completeExceptionally(error)
+  
+  private[this] def executorQueueNonEmpty(): Boolean = {
+    executor match {
+      case tpe: ThreadPoolExecutor => !tpe.getQueue.isEmpty
+      case _ => true
+    }
+  }
+  
+  // Non-blocking join support
+  private[rapid] def listenEither(k: Either[Throwable, Any] => Unit): Unit = {
+    done.whenComplete((v, ex) => 
+      if (ex == null) k(Right(v.asInstanceOf[Any])) 
+      else k(Left(Option(ex.getCause).getOrElse(ex))))
+  }
+  
   override def sync(): Return = try {
-    future.get()
+    done.get()
   } catch {
     case e: java.util.concurrent.ExecutionException => throw e.getCause
     case e: Throwable => throw e
@@ -20,7 +133,7 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
   override def cancel: Task[Boolean] = Task {
     if (!cancelled) {
       cancelled = true
-      future.cancel(true)
+      done.cancel(true)
       true
     } else {
       false
@@ -28,7 +141,7 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
   }
 
   override def await(duration: FiniteDuration): Option[Return] = try {
-    val result = future.get(duration.toMillis, TimeUnit.MILLISECONDS)
+    val result = done.get(duration.toMillis, TimeUnit.MILLISECONDS)
     Some(result)
   } catch {
     case _: java.util.concurrent.TimeoutException => None
@@ -47,32 +160,25 @@ object FixedThreadPoolFiber {
     }
   }
   
-  private lazy val executor = Executors.newFixedThreadPool(
+  private[rapid] lazy val executor = Executors.newFixedThreadPool(
     math.max(Runtime.getRuntime.availableProcessors(), 4),
     threadFactory
-  )
-  
-  private lazy val scheduledExecutor: ScheduledExecutorService = Executors.newScheduledThreadPool(
-    math.max(Runtime.getRuntime.availableProcessors() / 2, 2),
-    new ThreadFactory {
-      override def newThread(r: Runnable): Thread = {
-        val thread = new Thread(r)
-        thread.setName(s"rapid-scheduler-${counter.incrementAndGet()}")
-        thread.setDaemon(true)
-        thread
-      }
-    }
-  )
+  ).asInstanceOf[ThreadPoolExecutor]
   
   private val counter = new AtomicLong(0L)
-
-  private def create[Return](task: Task[Return]): Future[Return] = executor.submit(() => task.sync())
-
-  def fireAndForget[Return](task: Task[Return]): Unit = executor.submit(() => Try(task.sync()))
   
-  // Shutdown method for cleanup
-  def shutdown(): Unit = {
-    executor.shutdown()
-    scheduledExecutor.shutdown()
+  // Shared timer for all sleep operations
+  private object Timer {
+    private val es = Executors.newScheduledThreadPool(1, r => {
+      val t = new Thread(r, "rapid-timer")
+      t.setDaemon(true)
+      t
+    })
+    def after(d: Long, u: TimeUnit)(k: () => Unit): Unit =
+      es.schedule(new Runnable { def run(): Unit = k() }, d, u)
   }
+
+  def fireAndForget[Return](task: Task[Return]): Unit = new FixedThreadPoolFiber(task)
+  
+  def shutdown(): Unit = executor.shutdown()
 }
