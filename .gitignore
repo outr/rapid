@@ -13,3 +13,5 @@ target/
 .metals/
 metals.sbt
 /.vscode/
+.DS_Store
+**/.DS_Store

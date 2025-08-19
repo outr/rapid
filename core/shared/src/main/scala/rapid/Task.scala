@@ -491,8 +491,33 @@ trait Task[+Return] extends Any {
     scala.concurrent.Future(this.sync())
 }
 
-object Task extends task.UnitTask {
+object Task {
   var monitor: TaskMonitor = _
+  
+  def unit: Task[Unit] = task.UnitTask
+  
+  def pure[T](value: T): Task[T] = PureTask(value)
+  
+  def error[T](throwable: Throwable): Task[T] = ErrorTask[T](throwable)
+  
+  def defer[T](task: => Task[T]): Task[T] = unit.flatMap(_ => task)
+  
+  def sleep(duration: FiniteDuration): Task[Unit] = Platform.sleep(duration)
+  
+  def flatMap[T](f: Unit => Task[T]): Task[T] = unit.flatMap(f)
+  
+  def function[T](f: => T): Task[T] = apply(f)
+  
+  def succeed: Task[Unit] = unit
+  
+  def condition(condition: Task[Boolean],
+                delay: FiniteDuration = 1.second,
+                timeout: FiniteDuration = 24.hours,
+                errorOnTimeout: Boolean = true): Task[Unit] = unit.condition(condition, delay, timeout, errorOnTimeout)
+                
+  def timed[T](timer: Timer)(task: => Task[T]): Task[T] = unit.timed(timer)(task)
+  
+  def map[T](f: Unit => T): Task[T] = unit.map(f)
 
   def apply[T](f: => T): Task[T] = {
     val t = SingleTask(() => f)
@@ -504,5 +529,73 @@ object Task extends task.UnitTask {
     val c = new CompletableTask[Return]
     if (monitor != null) monitor.created(c)
     c
+  }
+  
+  def sequence[T, C[_]](tasks: C[Task[T]])
+                       (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
+                        asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = {
+    val empty = bf.newBuilder(tasks)
+    Task {
+      asIterable(tasks).foldLeft(empty) {
+        case (builder, task) => builder.addOne(task.sync())
+      }.result()
+    }
+  }
+  
+  def parSequence[T: ClassTag, C[_]](tasks: C[Task[T]])
+                                    (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
+                                     asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = {
+    val completable = Task.completable[C[T]]
+    val it = asIterable(tasks)
+    val total = it.size
+
+    if (total == 0) {
+      completable.success(bf.newBuilder(tasks).result())
+    } else {
+      val array = new Array[T](total)
+      val successed = new AtomicInteger(0)
+      val done = new AtomicBoolean(false)
+
+      val fibers = new Array[Fiber[_]](total)
+
+      def tryCompleteSuccess(): Unit = {
+        if (!done.get() && successed.get() == total && done.compareAndSet(false, true)) {
+          val b = bf.newBuilder(tasks)
+          var i = 0
+          while (i < total) {
+            b += array(i); i += 1
+          }
+          completable.success(b.result())
+        }
+      }
+
+      def failOnce(t: Throwable): Unit = {
+        if (done.compareAndSet(false, true)) {
+          completable.failure(t)
+          var i = 0
+          while (i < fibers.length) {
+            val f = fibers(i)
+            if (f != null) f.cancel.startAndForget()
+            i += 1
+          }
+        }
+      }
+
+      it.zipWithIndex.foreach { case (task, idx) =>
+        val observed: Task[Unit] =
+          task.attempt.map {
+            case scala.util.Success(v) =>
+              array(idx) = v
+              val finished = successed.incrementAndGet()
+              if (finished == total) tryCompleteSuccess()
+            case scala.util.Failure(e) =>
+              failOnce(e)
+          }
+
+        fibers(idx) = observed.start()
+      }
+    }
+
+    completable
   }
 }
