@@ -21,6 +21,7 @@ ThisBuild / version := "1.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := scala3
 ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
+ThisBuild / exportJars := false
 
 ThisBuild / sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost
 //ThisBuild / publishMavenStyle := true
@@ -43,11 +44,21 @@ ThisBuild / resolvers += Resolver.mavenLocal
 
 ThisBuild / outputStrategy := Some(StdoutOutput)
 
+// --- Test stability knobs (applies to all modules in CI) ---
+ThisBuild / Test / fork                 := true
+ThisBuild / Test / parallelExecution    := false
+ThisBuild / Test / javaOptions ++= Seq(
+  "-Xms2g","-Xmx2g",
+  "-Drapid.tests.usePlatformTimer=true", // route SleepTask to Platform.sleep in tests
+  "-Drapid.timer.tick=1",                // fine tick for test semantics
+  "-Drapid.timer.wheel=512",
+  "-Drapid.ready.capacityPow2=20",
+  "-Drapid.timer.drainBatch=128"
+)
+
 ThisBuild / Test / testOptions += Tests.Argument("-oDF")
 
-ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "30", "30")
-
-ThisBuild / Test / parallelExecution := false
+ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "300", "30")
 
 ThisBuild / Test / logBuffered := false
 
@@ -123,6 +134,11 @@ lazy val benchmark = project.in(file("benchmark"))
   .dependsOn(core.jvm, cats.jvm)
   .settings(
     name := s"$projectName-benchmark",
+    Compile / exportJars := false,
+    Test / exportJars := false,
+    Jmh / fork := true,
+    // Belt and suspenders: ensure core compiles before JMH compiles
+    Jmh / compile := (Jmh / compile).dependsOn(core.jvm / Compile / compile).value,
     libraryDependencies ++= Seq(
       "org.openjdk.jmh" % "jmh-core" % "1.37",
       "org.openjdk.jmh" % "jmh-generator-annprocess" % "1.37",
@@ -130,6 +146,16 @@ lazy val benchmark = project.in(file("benchmark"))
       "co.fs2" %% "fs2-core" % fs2Version,
       "dev.zio" %% "zio" % "2.0.15"
     )
+  )
+
+lazy val benchRunner = project.in(file("benchRunner"))
+  .dependsOn(benchmark)              // pulls benchmarks + core JVM classes
+  .settings(
+    fork := true,
+    Compile / mainClass := Some("org.openjdk.jmh.Main"),
+    // keep everything as classes:
+    Compile / exportJars := false,
+    Test    / exportJars := false
   )
 
 lazy val docs = project

@@ -9,7 +9,7 @@ import rapid._
 
 import java.util.concurrent.atomic.AtomicInteger
 
-class ParallelStreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
+class ParallelStreamSpec extends TestBootstrap with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
 
   "ParallelStream" should {
