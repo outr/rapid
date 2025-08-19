@@ -71,6 +71,7 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
             
           case c: CompletableTask[_] =>
             c.onSuccess(v => resume(v))
+            c.onFailure(e => completeExceptionally(e))
             cur = null; return
             
           case f: FixedThreadPoolFiber[_] =>
@@ -97,7 +98,7 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
       if ((cur eq null) && !done.isDone && conts.isEmpty) complete(())
     } finally {
       inLoop = false
-      if (pending || (cur ne null)) { pending = false; schedule() }
+      if (pending) { pending = false; schedule() }
     }
   }
   
@@ -118,9 +119,13 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Ret
   
   // Non-blocking join support
   private[rapid] def listenEither(k: Either[Throwable, Any] => Unit): Unit = {
-    done.whenComplete((v, ex) => 
-      if (ex == null) k(Right(v.asInstanceOf[Any])) 
-      else k(Left(Option(ex.getCause).getOrElse(ex))))
+    done.whenComplete { (v, ex) =>
+      if (ex == null) k(Right(v.asInstanceOf[Any]))
+      else {
+        val cause = Option(ex.getCause).getOrElse(ex)
+        k(Left(cause))
+      }
+    }
   }
   
   override def sync(): Return = try {

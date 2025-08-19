@@ -1,5 +1,6 @@
 package rapid
 
+import rapid.task.SleepTask
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
@@ -12,10 +13,9 @@ object Platform extends RapidPlatform {
 
   override def fireAndForget(task: Task[_]): Unit = FixedThreadPoolFiber.fireAndForget(task)
 
-  override def sleep(duration: FiniteDuration): Task[Unit] = Task.defer {
-    val millis = duration.toMillis
-    if (millis > 0L) {
-      Task(Thread.sleep(millis))
+  override def sleep(duration: FiniteDuration): Task[Unit] = {
+    if (duration.toMillis > 0L) {
+      SleepTask(duration)
     } else {
       Task.unit
     }

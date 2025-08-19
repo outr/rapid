@@ -1,0 +1,145 @@
+[
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "benchmark.ManySleepsBenchmark.ioBenchmark",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk/24.0.2/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+        ],
+        "jdkVersion" : "24.0.2",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "24.0.2",
+        "warmupIterations" : 1,
+        "warmupTime" : "5 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 1,
+        "measurementTime" : "5 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 30444.719125,
+            "scoreError" : "NaN",
+            "scoreConfidence" : [
+                "NaN",
+                "NaN"
+            ],
+            "scorePercentiles" : {
+                "0.0" : 30444.719125,
+                "50.0" : 30444.719125,
+                "90.0" : 30444.719125,
+                "95.0" : 30444.719125,
+                "99.0" : 30444.719125,
+                "99.9" : 30444.719125,
+                "99.99" : 30444.719125,
+                "99.999" : 30444.719125,
+                "99.9999" : 30444.719125,
+                "100.0" : 30444.719125
+            },
+            "scoreUnit" : "ms/op",
+            "rawData" : [
+                [
+                    30444.719125
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "benchmark.ManySleepsBenchmark.rapidBenchmark",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk/24.0.2/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+        ],
+        "jdkVersion" : "24.0.2",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "24.0.2",
+        "warmupIterations" : 1,
+        "warmupTime" : "5 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 1,
+        "measurementTime" : "5 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 30935.920125,
+            "scoreError" : "NaN",
+            "scoreConfidence" : [
+                "NaN",
+                "NaN"
+            ],
+            "scorePercentiles" : {
+                "0.0" : 30935.920125,
+                "50.0" : 30935.920125,
+                "90.0" : 30935.920125,
+                "95.0" : 30935.920125,
+                "99.0" : 30935.920125,
+                "99.9" : 30935.920125,
+                "99.99" : 30935.920125,
+                "99.999" : 30935.920125,
+                "99.9999" : 30935.920125,
+                "100.0" : 30935.920125
+            },
+            "scoreUnit" : "ms/op",
+            "rawData" : [
+                [
+                    30935.920125
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "benchmark.ManySleepsBenchmark.zioBenchmark",
+        "mode" : "avgt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/opt/homebrew/Cellar/openjdk/24.0.2/libexec/openjdk.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+        ],
+        "jdkVersion" : "24.0.2",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "24.0.2",
+        "warmupIterations" : 1,
+        "warmupTime" : "5 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 1,
+        "measurementTime" : "5 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 70171.706667,
+            "scoreError" : "NaN",
+            "scoreConfidence" : [
+                "NaN",
+                "NaN"
+            ],
+            "scorePercentiles" : {
+                "0.0" : 70171.706667,
+                "50.0" : 70171.706667,
+                "90.0" : 70171.706667,
+                "95.0" : 70171.706667,
+                "99.0" : 70171.706667,
+                "99.9" : 70171.706667,
+                "99.99" : 70171.706667,
+                "99.999" : 70171.706667,
+                "99.9999" : 70171.706667,
+                "100.0" : 70171.706667
+            },
+            "scoreUnit" : "ms/op",
+            "rawData" : [
+                [
+                    70171.706667
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    }
+]
+
+
