@@ -3,7 +3,7 @@ package rapid
 import scala.concurrent.TimeoutException
 import scala.concurrent.duration.FiniteDuration
 
-trait Blockable[Return] {
+trait Blockable[+Return] {
   def await(): Return
 
   def await(duration: FiniteDuration): Option[Return]

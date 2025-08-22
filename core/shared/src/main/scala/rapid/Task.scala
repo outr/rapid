@@ -22,59 +22,7 @@ trait Task[+Return] extends Any {
    *
    * @return the result of the task
    */
-  def sync(): Return = {
-    val stack = new java.util.ArrayDeque[Any]()
-    stack.push(this)
-
-    var previous: Any = ()
-
-    while (!stack.isEmpty) {
-      val head = stack.pop()
-
-      if (Task.monitor != null) {
-        head match {
-          case t: Task[_] => Task.monitor.start(t)
-          case _ => // Ignore Forge
-        }
-      }
-
-      try {
-        head match {
-          case _: UnitTask => previous = ()
-          case PureTask(value) => previous = value
-          case SingleTask(f) => previous = f()
-          case SleepTask(d) => previous = Platform.sleep(d).sync()
-          case t: Taskable[_] => stack.push(t.toTask)
-          case ErrorTask(throwable) => throw throwable
-          case c: CompletableTask[_] => previous = c.sync()
-          case f: Fiber[_] => previous = f.sync()
-          case f: Forge[_, _] => stack.push(f.asInstanceOf[Forge[Any, Any]](previous))
-          case FlatMapTask(source, forge) =>
-            stack.push(forge) // Push forge first so that source executes first
-            stack.push(source)
-          case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
-        }
-
-        if (Task.monitor != null) {
-          head match {
-            case t: Task[_] => Task.monitor.success(t, previous)
-            case _ => // Ignore Forge
-          }
-        }
-      } catch {
-        case throwable: Throwable =>
-          if (Task.monitor != null) {
-            head match {
-              case t: Task[_] => Task.monitor.error(t, throwable)
-              case _ => // Ignore Forge
-            }
-          }
-          throw throwable
-      }
-    }
-
-    previous.asInstanceOf[Return]
-  }
+  def sync(): Return = ConcurrencyManager.active.sync(this)
 
   /**
    * Synonym for sync(). Allows for clean usage with near transparent invocations.
@@ -87,16 +35,10 @@ trait Task[+Return] extends Any {
    * Starts the task and returns a `Fiber` representing the running task.
    */
   def start: Task[Fiber[Return]] = Task {
-    val f = Platform.createFiber(this)
-    if (Task.monitor != null) Task.monitor.fiberCreated(f, this)
-    f
+    val fiber = new Fiber[Return](this)
+    if (Task.monitor != null) Task.monitor.fiberCreated(fiber, this)
+    fiber
   }
-
-  /**
-   * Starts the task ignoring the result. This can be somewhat faster than start
-   * as the fiber is dropped.
-   */
-  def startAndForget(): Unit = Platform.fireAndForget(this)
 
   /**
    * Awaits (blocking) the completion of the task and returns the result.
@@ -450,7 +392,7 @@ trait Task[+Return] extends Any {
           var i = 0
           while (i < fibers.length) {
             val f = fibers(i)
-            if (f != null) f.cancel.startAndForget()
+            if (f != null) f.cancel.start()
             i += 1
           }
         }
