@@ -63,16 +63,16 @@ class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       )
       list.tasksPar.map { list =>
         list should be(List("One", "Two", "Three"))
-      }.sync()
+      }.await()
     }
     "process a longer list of tasks with delays in parallel" in {
       (0 until 100_000).map(i => Task.sleep(500.millis).map(_ => i * 2)).tasksPar.map { list =>
         list.sum should be(1409965408)
-      }.sync()
+      }.await()
     }
     "parallel process a list of zero tasks" in {
       val list: List[Task[String]] = Nil
-      list.tasksPar.map(list => list should be(Nil)).sync()
+      list.tasksPar.map(list => list should be(Nil)).await()
     }
     "handle repeat functionality" in {
       var counter = 0

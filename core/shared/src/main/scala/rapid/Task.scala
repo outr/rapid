@@ -1,5 +1,6 @@
 package rapid
 
+import rapid.concurrency.ConcurrencyManager
 import rapid.monitor.TaskMonitor
 import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
 
@@ -25,6 +26,11 @@ trait Task[+Return] extends Any {
   def sync(): Return = ConcurrencyManager.active.sync(this)
 
   /**
+   * Synonym for sync()
+   */
+  final def await(): Return = sync()
+
+  /**
    * Synonym for sync(). Allows for clean usage with near transparent invocations.
    *
    * @return the result of the task
@@ -39,13 +45,6 @@ trait Task[+Return] extends Any {
     if (Task.monitor != null) Task.monitor.fiberCreated(fiber, this)
     fiber
   }
-
-  /**
-   * Awaits (blocking) the completion of the task and returns the result.
-   *
-   * @return the result of the task
-   */
-  def await(): Return = start().await()
 
   /**
    * Attempts to execute the task and returns either the result or an exception.
@@ -322,18 +321,25 @@ trait Task[+Return] extends Any {
   def singleton: Task[Return] = {
     val triggered = new AtomicBoolean(false)
     val completable = Task.completable[Return]
-    val actualTask = map { r =>
-      completable.success(r)
-    }
 
     Task {
       val active = triggered.compareAndSet(false, true)
       if (active) {
-        actualTask.start().flatMap(_ => completable)
+        // Execute the task directly without creating a fiber to avoid hanging
+        try {
+          val result = this.sync()
+          completable.success(result)
+          result
+        } catch {
+          case e: Throwable =>
+            completable.failure(e)
+            throw e
+        }
       } else {
-        completable
+        // Wait for the completable to be completed by the first execution
+        completable.sync()
       }
-    }.flatten
+    }
   }
 
   /**
@@ -370,8 +376,7 @@ trait Task[+Return] extends Any {
       val successed = new AtomicInteger(0)
       val done = new AtomicBoolean(false)
 
-      // Optionally keep fibers to cancel on failure
-      val fibers = new Array[Fiber[_]](total)
+      // No longer using fibers for parallel execution
 
       def tryCompleteSuccess(): Unit = {
         if (!done.get() && successed.get() == total && done.compareAndSet(false, true)) {
@@ -388,30 +393,30 @@ trait Task[+Return] extends Any {
       def failOnce(t: Throwable): Unit = {
         if (done.compareAndSet(false, true)) {
           completable.failure(t)
-          // Best-effort cancel remaining
-          var i = 0
-          while (i < fibers.length) {
-            val f = fibers(i)
-            if (f != null) f.cancel.start()
-            i += 1
-          }
+          // No fibers to cancel in the simplified approach
         }
       }
 
+      // Create a single executor service for all tasks
+      import java.util.concurrent.Executors
+      val executor = Executors.newCachedThreadPool()
+      
       it.zipWithIndex.foreach { case (task, idx) =>
-        // observe success/failure explicitly
-        val observed: Task[Unit] =
-          task.attempt.map {
-            case scala.util.Success(v) =>
-              array(idx) = v
+        // Start each task concurrently using the shared executor service
+        // This allows true parallel execution without blocking
+        executor.submit(new java.lang.Runnable {
+          override def run(): Unit = {
+            try {
+              val result = task.sync()
+              array(idx) = result
               val finished = successed.incrementAndGet()
               if (finished == total) tryCompleteSuccess()
-            case scala.util.Failure(e) =>
-              failOnce(e)
+            } catch {
+              case e: Throwable =>
+                failOnce(e)
+            }
           }
-
-        // start and keep the fiber to allow cancellation
-        fibers(idx) = observed.start()
+        })
       }
     }
 

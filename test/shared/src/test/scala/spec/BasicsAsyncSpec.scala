@@ -128,7 +128,7 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       var condition = false
       Task.sleep(100.millis).effect(Task {
         condition = true
-      }).startAndForget()
+      }).start()
       Task.condition(Task.function(condition), delay = 25.millis).function {
         condition should be(true)
       }
