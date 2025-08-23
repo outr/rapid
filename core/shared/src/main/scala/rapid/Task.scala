@@ -366,60 +366,28 @@ trait Task[+Return] extends Any {
                                     (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
                                      asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
     val completable = Task.completable[C[T]]
-    val it = asIterable(tasks)
-    val total = it.size
-
+    val total = asIterable(tasks).size
     if (total == 0) {
       completable.success(bf.newBuilder(tasks).result())
     } else {
       val array = new Array[T](total)
-      val successed = new AtomicInteger(0)
-      val done = new AtomicBoolean(false)
+      val completed = new AtomicInteger(0)
 
-      // No longer using fibers for parallel execution
-
-      def tryCompleteSuccess(): Unit = {
-        if (!done.get() && successed.get() == total && done.compareAndSet(false, true)) {
-          // Build in original collection shape
-          val b = bf.newBuilder(tasks)
-          var i = 0
-          while (i < total) {
-            b += array(i); i += 1
-          }
-          completable.success(b.result())
+      def add(r: T, index: Int): Unit = {
+        array(index) = r
+        val finished = completed.incrementAndGet()
+        if (finished == total) {
+          completable.success(bf.newBuilder(tasks).addAll(array).result())
         }
       }
 
-      def failOnce(t: Throwable): Unit = {
-        if (done.compareAndSet(false, true)) {
-          completable.failure(t)
-          // No fibers to cancel in the simplified approach
-        }
-      }
-
-      // Create a single executor service for all tasks
-      import java.util.concurrent.Executors
-      val executor = Executors.newCachedThreadPool()
-      
-      it.zipWithIndex.foreach { case (task, idx) =>
-        // Start each task concurrently using the shared executor service
-        // This allows true parallel execution without blocking
-        executor.submit(new java.lang.Runnable {
-          override def run(): Unit = {
-            try {
-              val result = task.sync()
-              array(idx) = result
-              val finished = successed.incrementAndGet()
-              if (finished == total) tryCompleteSuccess()
-            } catch {
-              case e: Throwable =>
-                failOnce(e)
-            }
-          }
-        })
+      asIterable(tasks).zipWithIndex.foreach {
+        case (task, index) => task.map { r =>
+          array(index) = r
+          add(r, index)
+        }.start()
       }
     }
-
     completable
   }
 

@@ -1,6 +1,6 @@
 package rapid.concurrency
 
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 object VirtualThreadConcurrencyManager extends ConcurrencyManager {
@@ -8,22 +8,23 @@ object VirtualThreadConcurrencyManager extends ConcurrencyManager {
   private val zero = 0.seconds
 
   override def schedule(delay: FiniteDuration,
-                        execution: TaskExecution[_]): Unit = {
+                        execution: TaskExecution[_]): Cancellable = {
+    val cancelled = new AtomicBoolean(false)
     val thread = Thread
       .ofVirtual()
       .name(s"rapid-${counter.incrementAndGet()}")
       .start(() => {
         try {
-          if (!execution.cancelled) {
+          if (!cancelled.get() && !execution.cancelled) {
             // Use interruptible sleep that can be cancelled
             val startTime = System.currentTimeMillis()
             val delayMillis = delay.toMillis
 
-            while (!execution.cancelled && (System.currentTimeMillis() - startTime) < delayMillis) {
+            while (!cancelled.get() && !execution.cancelled && (System.currentTimeMillis() - startTime) < delayMillis) {
               Thread.sleep(1) // Small sleep to allow cancellation checks
             }
           }
-          if (!execution.cancelled) {
+          if (!cancelled.get() && !execution.cancelled) {
             execution.execute(sync = false)
           }
         } catch {
@@ -31,9 +32,19 @@ object VirtualThreadConcurrencyManager extends ConcurrencyManager {
         }
       })
 
-    // Store the thread reference so we can interrupt it if needed
-    // For now, we'll rely on the cancellation flag checks
+    new Cancellable {
+      override def cancel(): Boolean = {
+        if (cancelled.compareAndSet(false, true)) {
+          thread.interrupt()
+          true
+        } else {
+          false
+        }
+      }
+      
+      override def isCancelled: Boolean = cancelled.get()
+    }
   }
 
-  override def fire(execution: TaskExecution[_]): Unit = schedule(zero, execution)
+  override def fire(execution: TaskExecution[_]): Cancellable = schedule(zero, execution)
 }

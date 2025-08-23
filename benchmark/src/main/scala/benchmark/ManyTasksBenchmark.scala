@@ -50,7 +50,7 @@ class ManyTasksBenchmark {
     val latch = new CountDownLatch(tasks)
     var i = 0
     while (i < tasks) {
-      Task(simpleComputation).map(_ => latch.countDown()).startAndForget()
+      Task(simpleComputation).map(_ => latch.countDown()).start()
       i += 1
     }
     latch.await()

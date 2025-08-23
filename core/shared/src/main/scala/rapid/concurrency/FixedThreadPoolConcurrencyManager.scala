@@ -1,7 +1,7 @@
 package rapid.concurrency
 
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.{Executors, ScheduledExecutorService, ThreadFactory, TimeUnit}
+import java.util.concurrent.{Executors, ScheduledExecutorService, ThreadFactory, TimeUnit, Future => JavaFuture}
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
@@ -34,8 +34,8 @@ object FixedThreadPoolConcurrencyManager extends ConcurrencyManager {
     }
   )
 
-  override def schedule(delay: FiniteDuration, execution: TaskExecution[_]): Unit = {
-    scheduledExecutor.schedule(() => {
+  override def schedule(delay: FiniteDuration, execution: TaskExecution[_]): Cancellable = {
+    val future: JavaFuture[_] = scheduledExecutor.schedule(() => {
       Try {
         // Check for cancellation before executing the scheduled task
         if (!execution.cancelled) {
@@ -43,7 +43,33 @@ object FixedThreadPoolConcurrencyManager extends ConcurrencyManager {
         }
       }
     }, delay.toMillis, TimeUnit.MILLISECONDS)
+
+    new Cancellable {
+      override def cancel(): Boolean = {
+        if (!future.isDone) {
+          future.cancel(true)
+        } else {
+          false
+        }
+      }
+      
+      override def isCancelled: Boolean = future.isCancelled
+    }
   }
 
-  override def fire(execution: TaskExecution[_]): Unit = executor.submit(() => Try(execution.execute(sync = false)))
+  override def fire(execution: TaskExecution[_]): Cancellable = {
+    val future: JavaFuture[_] = executor.submit(() => Try(execution.execute(sync = false)))
+    
+    new Cancellable {
+      override def cancel(): Boolean = {
+        if (!future.isDone) {
+          future.cancel(true)
+        } else {
+          false
+        }
+      }
+      
+      override def isCancelled: Boolean = future.isCancelled
+    }
+  }
 }

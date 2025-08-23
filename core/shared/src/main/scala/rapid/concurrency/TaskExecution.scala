@@ -10,6 +10,7 @@ import scala.util.{Failure, Success}
 class TaskExecution[Return](task: Task[Return]) {
   @volatile private var previous: Any = ()
   private val stack = new util.ArrayDeque[Any]
+  @volatile private var cancellable: Cancellable = _
 
   @volatile var cancelled = false
 
@@ -25,11 +26,32 @@ class TaskExecution[Return](task: Task[Return]) {
     }
   }
 
-  def async(): Unit = ConcurrencyManager.active.fire(this)
+  def async(): Unit = {
+    cancellable = ConcurrencyManager.active.fire(this)
+  }
+
+  def schedule(delay: scala.concurrent.duration.FiniteDuration): Unit = {
+    cancellable = ConcurrencyManager.active.schedule(delay, this)
+  }
+
+  def cancelAll(): Unit = {
+    cancelled = true
+    if (cancellable != null) {
+      cancellable.cancel()
+      cancellable = null
+    }
+    // Complete the task with a CancellationException so sync() calls can return
+    if (!completable.isComplete) {
+      completable.failure(new scala.concurrent.CancellationException("Task was cancelled"))
+    }
+  }
 
   @tailrec
   final def execute(sync: Boolean): Unit = if (stack.isEmpty) {
     completable.success(previous.asInstanceOf[Return])
+  } else if (cancelled) {
+    // Task was cancelled, complete with CancellationException
+    completable.failure(new scala.concurrent.CancellationException("Task was cancelled"))
   } else {
     val head = stack.pop()
 
@@ -46,7 +68,7 @@ class TaskExecution[Return](task: Task[Return]) {
       head match {
         case SleepTask(d) if sync => Thread.sleep(d.toMillis)
         case SleepTask(d) =>
-          ConcurrencyManager.active.schedule(d, this)
+          schedule(d)
           recurse = false
         case c: CompletableTask[_] if sync => previous = c.sync()
         case c: CompletableTask[_] =>

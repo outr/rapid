@@ -14,7 +14,12 @@ class Fiber[+Return](task: Task[Return]) extends Task[Return] {
 
   override def start: Task[Fiber[Return]] = Task.pure(this)
 
-  override def sync(): Return = execution.completable.sync()
+  override def sync(): Return = {
+    if (execution.cancelled) {
+      throw new scala.concurrent.CancellationException("Fiber was cancelled")
+    }
+    execution.completable.sync()
+  }
 
   def await(timeout: FiniteDuration,
             delay: FiniteDuration = 100.millis): Option[Return] = {
@@ -38,7 +43,7 @@ class Fiber[+Return](task: Task[Return]) extends Task[Return] {
    * Attempts to cancel the Fiber. Returns true if successful.
    */
   def cancel: Task[Boolean] = Task {
-    execution.cancelled = true
+    execution.cancelAll()
     true
   }
 
