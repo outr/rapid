@@ -4,7 +4,7 @@ import rapid.concurrency.TaskExecution
 
 import java.util.concurrent.CompletableFuture
 import scala.annotation.nowarn
-import scala.concurrent.Future
+import scala.concurrent.{CancellationException, Future}
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success, Try}
 
@@ -62,19 +62,6 @@ class Fiber[+Return](task: Task[Return]) extends Task[Return] {
 }
 
 object Fiber {
-  def main(args: Array[String]): Unit = {
-    val i = Task {
-      Thread.sleep(500)
-      println("RUNNING!")
-      5 * 5
-    }
-    println("Starting...")
-    val fiber = i.start()
-    println("Started!")
-    println(fiber.sync())
-    println("Finished!")
-  }
-
   @nowarn()
   def fromFuture[Return](future: Future[Return])(implicit ec: scala.concurrent.ExecutionContext): Fiber[Return] = {
     val completable = Task.completable[Return]
