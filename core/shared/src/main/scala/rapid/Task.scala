@@ -5,7 +5,6 @@ import rapid.monitor.TaskMonitor
 import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
-import scala.annotation.tailrec
 import scala.collection.BuildFrom
 import scala.concurrent.TimeoutException
 import scala.concurrent.duration.{DurationLong, FiniteDuration}

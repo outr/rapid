@@ -8,7 +8,7 @@ object VirtualThreadConcurrencyManager extends ConcurrencyManager {
   private val zero = 0.seconds
 
   override def schedule(delay: FiniteDuration,
-                        execution: TaskExecution[_]): Cancellable = {
+                        execution: TaskExecution[_]): Unit = {
     val cancelled = new AtomicBoolean(false)
     val thread = Thread
       .ofVirtual()
@@ -31,20 +31,7 @@ object VirtualThreadConcurrencyManager extends ConcurrencyManager {
           case _: InterruptedException => // Thread was interrupted, ignore
         }
       })
-
-    new Cancellable {
-      override def cancel(): Boolean = {
-        if (cancelled.compareAndSet(false, true)) {
-          thread.interrupt()
-          true
-        } else {
-          false
-        }
-      }
-      
-      override def isCancelled: Boolean = cancelled.get()
-    }
   }
 
-  override def fire(execution: TaskExecution[_]): Cancellable = schedule(zero, execution)
+  override def fire(execution: TaskExecution[_]): Unit = schedule(zero, execution)
 }

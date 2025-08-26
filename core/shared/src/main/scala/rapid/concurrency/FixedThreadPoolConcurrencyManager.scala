@@ -34,8 +34,8 @@ object FixedThreadPoolConcurrencyManager extends ConcurrencyManager {
     }
   )
 
-  override def schedule(delay: FiniteDuration, execution: TaskExecution[_]): Cancellable = {
-    val future: JavaFuture[_] = scheduledExecutor.schedule(() => {
+  override def schedule(delay: FiniteDuration, execution: TaskExecution[_]): Unit = {
+    scheduledExecutor.schedule(() => {
       Try {
         // Check for cancellation before executing the scheduled task
         if (!execution.cancelled) {
@@ -43,33 +43,9 @@ object FixedThreadPoolConcurrencyManager extends ConcurrencyManager {
         }
       }
     }, delay.toMillis, TimeUnit.MILLISECONDS)
-
-    new Cancellable {
-      override def cancel(): Boolean = {
-        if (!future.isDone) {
-          future.cancel(true)
-        } else {
-          false
-        }
-      }
-      
-      override def isCancelled: Boolean = future.isCancelled
-    }
   }
 
-  override def fire(execution: TaskExecution[_]): Cancellable = {
-    val future: JavaFuture[_] = executor.submit(() => Try(execution.execute(sync = false)))
-    
-    new Cancellable {
-      override def cancel(): Boolean = {
-        if (!future.isDone) {
-          future.cancel(true)
-        } else {
-          false
-        }
-      }
-      
-      override def isCancelled: Boolean = future.isCancelled
-    }
+  override def fire(execution: TaskExecution[_]): Unit = {
+    executor.submit(() => Try(execution.execute(sync = false)))
   }
 }
