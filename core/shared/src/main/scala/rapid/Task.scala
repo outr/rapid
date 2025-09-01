@@ -1,7 +1,7 @@
 package rapid
 
 import rapid.monitor.TaskMonitor
-import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
+import rapid.task.{CommonTasks, CompletableTask, DirectFlatMapTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.tailrec
@@ -23,49 +23,177 @@ trait Task[+Return] extends Any {
    * @return the result of the task
    */
   def sync(): Return = {
-    val stack = new java.util.ArrayDeque[Any]()
-    stack.push(this)
-
+    // Lazy ArrayDeque allocation - only create when needed
+    // This avoids millions of allocations for simple FlatMap chains
+    var stack: java.util.ArrayDeque[Any] = null
+    var current: Any = this
     var previous: Any = ()
+    
+    // Cache monitor reference to avoid volatile read overhead in tight loops
+    val monitor = Task.monitor
 
-    while (!stack.isEmpty) {
-      val head = stack.pop()
+    while (current != null || (stack != null && !stack.isEmpty)) {
+      val head = if (current != null) {
+        val c = current
+        current = null
+        c
+      } else {
+        stack.pop()
+      }
 
-      if (Task.monitor != null) {
+      if (monitor != null) {
         head match {
-          case t: Task[_] => Task.monitor.start(t)
+          case t: Task[_] => monitor.start(t)
           case _ => // Ignore Forge
         }
       }
 
       try {
-        head match {
-          case _: UnitTask => previous = ()
-          case PureTask(value) => previous = value
-          case SingleTask(f) => previous = f()
-          case SleepTask(d) => previous = Platform.sleep(d).sync()
-          case t: Taskable[_] => stack.push(t.toTask)
-          case ErrorTask(throwable) => throw throwable
-          case c: CompletableTask[_] => previous = c.sync()
-          case f: Fiber[_] => previous = f.sync()
-          case f: Forge[_, _] => stack.push(f.asInstanceOf[Forge[Any, Any]](previous))
-          case FlatMapTask(source, forge) =>
-            stack.push(forge) // Push forge first so that source executes first
+        // HOT PATH: Use explicit instanceof checks for common cases (JIT optimizes these better)
+        if (head.isInstanceOf[DirectFlatMapTask[_, _]]) {
+          val dft = head.asInstanceOf[DirectFlatMapTask[Any, Any]]
+          val source = dft.source
+          val func = dft.f
+          
+          // FAST PATH: Detect deep accumulator chains and execute tail-recursively
+          // This handles foldLeft patterns that create deep DirectFlatMapTask chains
+          if (source.isInstanceOf[DirectFlatMapTask[_, _]]) {
+            // Count chain depth and check if it's an accumulator pattern
+            var depth = 0
+            var currentChain: Any = source
+            var isAccumulatorPattern = true
+            
+            // Quick depth check (limit to avoid slow traversal)
+            while (depth < 100 && currentChain.isInstanceOf[DirectFlatMapTask[_, _]]) {
+              currentChain = currentChain.asInstanceOf[DirectFlatMapTask[Any, Any]].source
+              depth += 1
+            }
+            
+            // If we have a deep chain, execute it tail-recursively
+            if (depth >= 50) {
+              // Collect all functions in the chain
+              val functions = new java.util.ArrayList[Any => Task[Any]](depth + 1)
+              functions.add(func)
+              
+              currentChain = source
+              while (currentChain.isInstanceOf[DirectFlatMapTask[_, _]]) {
+                val chainDft = currentChain.asInstanceOf[DirectFlatMapTask[Any, Any]]
+                functions.add(chainDft.f)
+                currentChain = chainDft.source
+              }
+              
+              // Execute from the bottom up
+              var result: Any = currentChain match {
+                case PureTask(v) => v
+                case SingleTask(f) => 
+                  try { f() } catch { case e: Throwable => throw e }
+                case _ =>
+                  // Not an accumulator pattern, fall back to regular execution
+                  if (stack == null) stack = new java.util.ArrayDeque[Any](32)
+                  stack.push(func)
+                  stack.push(source)
+                  null
+              }
+              
+              if (result != null) {
+                // Execute all functions in reverse order (bottom-up)
+                var i = functions.size() - 1
+                while (i >= 0) {
+                  val f = functions.get(i)
+                  val nextTask = f(result)
+                  result = nextTask match {
+                    case PureTask(v) => v
+                    case SingleTask(g) => 
+                      try { g() } catch { case e: Throwable => throw e }
+                    case _ =>
+                      // Complex task, can't optimize further
+                      current = nextTask
+                      var j = i - 1
+                      while (j >= 0) {
+                        current = DirectFlatMapTask(current.asInstanceOf[Task[Any]], functions.get(j))
+                        j -= 1
+                      }
+                      i = -1 // Exit outer loop
+                      null
+                  }
+                  if (result != null) i -= 1
+                }
+                if (result != null) previous = result
+              }
+            } else if (source.isInstanceOf[PureTask[_]]) {
+              // DirectFlatMap with PureTask - execute immediately
+              val value = source.asInstanceOf[PureTask[Any]].value
+              current = func(value)
+            } else if (source.isInstanceOf[SingleTask[_]]) {
+              // DirectFlatMap with SingleTask - execute inline
+              try {
+                val result = source.asInstanceOf[SingleTask[Any]].f()
+                current = func(result)
+              } catch {
+                case e: Throwable => current = ErrorTask(e)
+              }
+            } else {
+              // Default handling for other source types
+              if (stack == null) stack = new java.util.ArrayDeque[Any](32)
+              stack.push(func)
+              stack.push(source)
+            }
+          } else {
+            // Default DirectFlatMap handling
+            if (stack == null) stack = new java.util.ArrayDeque[Any](32)
+            stack.push(func)
             stack.push(source)
-          case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
+          }
+        } else if (head.isInstanceOf[PureTask[_]]) {
+          previous = head.asInstanceOf[PureTask[Any]].value
+        } else if (head.isInstanceOf[SingleTask[_]]) {
+          previous = head.asInstanceOf[SingleTask[Any]].f()
+        } else if (head.isInstanceOf[Function1[_, _]]) {
+          // Raw function from DirectFlatMapTask
+          if (stack == null) stack = new java.util.ArrayDeque[Any](32)
+          stack.push(head.asInstanceOf[Any => Task[Any]](previous))
+        } else {
+          // Fall back to pattern matching for less common cases
+          head match {
+            case _: UnitTask => previous = ()
+            case SleepTask(d) => 
+              val millis = d.toMillis
+              if (millis > 0L) Thread.sleep(millis)
+              previous = ()
+            case t: Taskable[_] => 
+              if (stack == null) stack = new java.util.ArrayDeque[Any](32)
+              stack.push(t.toTask)
+            case ErrorTask(throwable) => throw throwable
+            case c: CompletableTask[_] => previous = c.sync()
+            case f: Fiber[_] => previous = f.sync()
+            case f: Forge[_, _] => 
+              if (stack == null) stack = new java.util.ArrayDeque[Any](32)
+              stack.push(f.asInstanceOf[Forge[Any, Any]](previous))
+            case FlatMapTask(PureTask(value), forge) =>
+              current = forge.asInstanceOf[Forge[Any, Any]](value)
+            case FlatMapTask(SleepTask(d), forge) =>
+              val millis = d.toMillis
+              if (millis > 0L) Thread.sleep(millis)
+              current = forge.asInstanceOf[Forge[Any, Any]](())
+            case FlatMapTask(source, forge) =>
+              if (stack == null) stack = new java.util.ArrayDeque[Any](32)
+              stack.push(forge)
+              stack.push(source)
+            case _ => throw new UnsupportedOperationException(s"Unsupported task: $head (${head.getClass.getName})")
+          }
         }
 
-        if (Task.monitor != null) {
+        if (monitor != null) {
           head match {
-            case t: Task[_] => Task.monitor.success(t, previous)
+            case t: Task[_] => monitor.success(t, previous)
             case _ => // Ignore Forge
           }
         }
       } catch {
         case throwable: Throwable =>
-          if (Task.monitor != null) {
+          if (monitor != null) {
             head match {
-              case t: Task[_] => Task.monitor.error(t, throwable)
+              case t: Task[_] => monitor.error(t, throwable)
               case _ => // Ignore Forge
             }
           }
@@ -157,8 +285,22 @@ trait Task[+Return] extends Any {
    * @return a new task with the transformed result
    */
   def map[T](f: Return => T): Task[T] = this match {
-    case PureTask(value) => PureTask(f(value)) // Directly apply transformation
+    case PureTask(value) => 
+      val result = f(value)
+      // Use cached PureTask for common values
+      result match {
+        case i: Int if i >= -128 && i <= 127 => 
+          CommonTasks.pureInt(i).asInstanceOf[Task[T]]
+        case b: Boolean => 
+          CommonTasks.pureBoolean(b).asInstanceOf[Task[T]]
+        case _ => 
+          PureTask(result)
+      }
     case SingleTask(g) => SingleTask(() => f(g())) // Apply transformation inline
+    case ErrorTask(throwable) => ErrorTask(throwable) // Error propagates unchanged
+    case SleepTask(d) => 
+      // Sleep returns Unit, so we know the type - optimize by chaining
+      FlatMapTask(SleepTask(d), Forge[Unit, T](_ => PureTask(f(().asInstanceOf[Return]))))
     case _ => FlatMapTask(this, Forge[Return, T](i => PureTask(f(i))))
   }
 
@@ -205,7 +347,12 @@ trait Task[+Return] extends Any {
    */
   def flatMap[T](f: Return => Task[T]): Task[T] = this match {
     case PureTask(value) => f(value) // Direct execution for pure values
-    case _ => FlatMapTask(this, Forge(f))
+    case _: UnitTask => f(().asInstanceOf[Return]) // Avoid building extra DirectFlatMapTask for Unit
+    case ErrorTask(throwable) => ErrorTask(throwable) // Error propagates unchanged
+    case SleepTask(d) => 
+      // Sleep returns Unit, optimize by using DirectFlatMapTask with Unit function
+      DirectFlatMapTask(SleepTask(d), (_: Unit) => f(().asInstanceOf[Return]))
+    case _ => DirectFlatMapTask(this, f) // Zero-allocation path: store raw function directly
   }
 
   /**
@@ -498,6 +645,24 @@ object Task extends task.UnitTask {
     val t = SingleTask(() => f)
     if (monitor != null) monitor.created(t)
     t
+  }
+  
+  /**
+   * Optimized Task.pure that uses cached instances for common values
+   */
+  override def pure[T](value: T): Task[T] = value match {
+    case i: Int if i >= -128 && i <= 127 => 
+      CommonTasks.pureInt(i).asInstanceOf[Task[T]]
+    case b: Boolean => 
+      CommonTasks.pureBoolean(b).asInstanceOf[Task[T]]
+    case null => 
+      CommonTasks.PURE_NULL.asInstanceOf[Task[T]]
+    case "" => 
+      CommonTasks.PURE_EMPTY_STRING.asInstanceOf[Task[T]]
+    case _ => 
+      val t = PureTask(value)
+      if (monitor != null) monitor.created(t)
+      t
   }
 
   def completable[Return]: CompletableTask[Return] = {

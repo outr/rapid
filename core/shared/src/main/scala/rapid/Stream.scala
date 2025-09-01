@@ -1082,8 +1082,17 @@ object Stream {
             } else {
               outerPull.pull() match {
                 case Some(stream) =>
-                  val p = stream.task.sync()
-                  innerQueue.offer(p)
+                  // Create a truly lazy Pull that defers execution until pull() is called
+                  val lazyPull = new Pull[Return] {
+                    private var actualPull: Option[Pull[Return]] = None
+                    override def pull(): Option[Return] = {
+                      if (actualPull.isEmpty) {
+                        actualPull = Some(stream.task.sync())
+                      }
+                      actualPull.get.pull()
+                    }
+                  }
+                  innerQueue.offer(lazyPull)
                   loop()
                 case None =>
                   None

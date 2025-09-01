@@ -8,10 +8,12 @@ import scala.util.{Failure, Success, Try}
 class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
   @volatile private var result: Try[Return] = _
   @volatile private var cancelled = false
+  
+  override val id: Long = VirtualThreadFiber.counter.incrementAndGet()
 
   private val thread = Thread
     .ofVirtual()
-    .name(s"rapid-${VirtualThreadFiber.counter.incrementAndGet()}")
+    .name(s"rapid-${id}")
     .start(() => {
       if (!cancelled) {
         try {

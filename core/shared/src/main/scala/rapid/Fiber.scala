@@ -6,6 +6,16 @@ import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success}
 
 trait Fiber[+Return] extends Task[Return] {
+  /**
+   * Unique identifier for this fiber, used for shard distribution in timer wheels
+   */
+  def id: Long
+  
+  /**
+   * Optional preferred executor for affinity preservation
+   */
+  def preferredExecutor: Option[Int] = None
+  
   override def start: Task[Fiber[Return]] = Task.pure(this)
 
   /**
@@ -38,3 +48,4 @@ object Fiber {
     completable.start()
   }
 }
+

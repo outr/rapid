@@ -13,3 +13,4 @@ target/
 .metals/
 metals.sbt
 /.vscode/
+.scala-build/
