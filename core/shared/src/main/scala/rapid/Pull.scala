@@ -9,6 +9,8 @@ trait Pull[+T] {
    * @return Some(next) if available, or None if exhausted.
    */
   def pull(): Option[T]
+
+  def close: Task[Unit] = Task.unit
 }
 
 object Pull {

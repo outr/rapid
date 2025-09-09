@@ -596,6 +596,11 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     filter(seen.add)
   }
 
+  def distinctOn[V](f: Return => V): Stream[Return] = {
+    val seen = mutable.Set.empty[V]
+    filter(r => seen.add(f(r)))
+  }
+
   def intersperse[T >: Return](separator: T): Stream[T] = {
     val first = new AtomicBoolean(true)
     transform { r =>
