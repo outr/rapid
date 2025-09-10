@@ -21,41 +21,52 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       val done = new AtomicBoolean(false)
       var current: Option[Pull[T]] = None
 
-      () => {
-        if (done.get()) None
-        else {
-          @annotation.tailrec
-          def loop(): Option[T] = current match {
-            case Some(inner) =>
-              inner.pull() match {
-                case some@Some(_) => some
-                case None =>
-                  current = None
-                  loop()
-              }
+      new Pull[T] {
+        override def pull(): Option[T] = {
+          if (done.get()) None
+          else {
+            @annotation.tailrec
+            def loop(): Option[T] = current match {
+              case Some(inner) =>
+                inner.pull() match {
+                  case some@Some(_) => some
+                  case None =>
+                    try inner.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () }
+                    current = None
+                    loop()
+                }
 
-            case None =>
-              outer.pull() match {
-                case Some(a) =>
-                  val stepRes = f(a)
-                  stepRes match {
-                    case e: Step.Emit[_] => Some(e.value.asInstanceOf[T])
-                    case Step.Skip => loop()
-                    case Step.Stop =>
-                      done.set(true)
-                      None
-                    case c: Step.Concat[_] =>
-                      current = Some(c.pull.asInstanceOf[Pull[T]])
-                      loop()
-                  }
-                case None =>
-                  done.set(true)
-                  None
-              }
+              case None =>
+                outer.pull() match {
+                  case Some(a) =>
+                    val stepRes = f(a)
+                    stepRes match {
+                      case e: Step.Emit[_] => Some(e.value.asInstanceOf[T])
+                      case Step.Skip => loop()
+                      case Step.Stop =>
+                        done.set(true)
+                        None
+                      case c: Step.Concat[_] =>
+                        current = Some(c.pull.asInstanceOf[Pull[T]])
+                        loop()
+                    }
+                  case None =>
+                    done.set(true)
+                    None
+                }
+            }
+
+            loop()
           }
-
-          loop()
         }
+
+        override def close: Task[Unit] =
+          Task {
+            current.foreach { p =>
+              try p.close.sync() catch { case _: Throwable => () }
+            }
+            current = None
+          }.flatMap(_ => outer.close.handleError(_ => Task.unit))
       }
     })
 
@@ -79,6 +90,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
           }
           loop()
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     }
   )
@@ -107,6 +120,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
           }
           loop()
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     }
   )
@@ -195,6 +210,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
         override def pull(): Option[T] = {
           pullR.pull().map(f)
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     }
   )
@@ -216,6 +233,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case None => None
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     }
   )
@@ -306,6 +325,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case None => None
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     }
   )
@@ -328,6 +349,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case None => None
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     }
   )
@@ -355,6 +378,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case None => None
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     }
   )
@@ -398,6 +423,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             }
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     })
 
@@ -409,47 +436,51 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    */
   def groupSequential[G, R >: Return](grouper: R => G): Stream[Grouped[G, R]] =
     new Stream(task.map { pullR =>
-      var pushedBack: Option[R] = None
-      var done = false
+      new Pull[Grouped[G, R]] {
+        private var pushedBack: Option[R] = None
+        private var done = false
 
-      () => {
-        if (done)
-          None
-        else {
-          val firstOpt = if (pushedBack.isDefined) {
-            val v = pushedBack
-            pushedBack = None
-            v
-          } else {
-            pullR.pull()
-          }
-          firstOpt match {
-            case None =>
-              done = true
-              None
-            case Some(first) =>
-              val key = grouper(first)
-              val buf = scala.collection.mutable.ListBuffer.empty[R]
-              buf += first
-              var keepGoing = true
-              while (keepGoing) {
-                val n = pullR.pull()
-                if (n.isDefined) {
-                  val v = n.get
-                  if (grouper(v) == key) {
-                    buf += v
+        override def pull(): Option[Grouped[G, R]] = {
+          if (done)
+            None
+          else {
+            val firstOpt = if (pushedBack.isDefined) {
+              val v = pushedBack
+              pushedBack = None
+              v
+            } else {
+              pullR.pull()
+            }
+            firstOpt match {
+              case None =>
+                done = true
+                None
+              case Some(first) =>
+                val key = grouper(first)
+                val buf = scala.collection.mutable.ListBuffer.empty[R]
+                buf += first
+                var keepGoing = true
+                while (keepGoing) {
+                  val n = pullR.pull()
+                  if (n.isDefined) {
+                    val v = n.get
+                    if (grouper(v) == key) {
+                      buf += v
+                    } else {
+                      pushedBack = Some(v)
+                      keepGoing = false
+                    }
                   } else {
-                    pushedBack = Some(v)
+                    done = true
                     keepGoing = false
                   }
-                } else {
-                  done = true
-                  keepGoing = false
                 }
-              }
-              Some(Grouped(key, buf.toList))
+                Some(Grouped(key, buf.toList))
+            }
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     })
 
@@ -493,6 +524,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             }
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     })
 
@@ -553,31 +586,36 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             Some(out)
           }
         }
+
+        override def close: Task[Unit] = pullR.close
       }
     })
   }
 
-  def find(p: Return => Boolean): Task[Option[Return]] = {
-    task.map { pullR =>
-      @tailrec def loop(): Option[Return] = pullR.pull() match {
-        case Some(r) if p(r) => Some(r)
-        case Some(_) => loop()
-        case None => None
-      }
-      loop()
+  def find(p: Return => Boolean): Task[Option[Return]] =
+    task.flatMap { pullR =>
+      Task {
+        @tailrec def loop(): Option[Return] = pullR.pull() match {
+          case Some(r) if p(r) => Some(r)
+          case Some(_) => loop()
+          case None => None
+        }
+        loop()
+      }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
-  }
 
   def exists(p: Return => Boolean): Task[Boolean] = find(p).map(_.isDefined)
 
   def forall(p: Return => Boolean): Task[Boolean] =
-    task.map { pullR =>
-      @tailrec def loop(): Boolean = pullR.pull() match {
-        case Some(r) if p(r) => loop()
-        case Some(_) => false
-        case None => true
-      }
-      loop()
+    task.flatMap { pullR =>
+      Task {
+        @tailrec def loop(): Boolean = pullR.pull() match {
+          case Some(r) if p(r) => loop()
+          case Some(_) => false
+          case None => true
+        }
+        loop()
+      }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
 
   def contains[T >: Return](elem: T): Task[Boolean] = exists(_ == elem)
@@ -618,6 +656,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
               a <- pullA.pull()
               b <- pullB.pull()
             } yield (a, b)
+
+          override def close: Task[Unit] = pullA.close.flatMap(_ => pullB.close)
         }
       }
     }
@@ -633,6 +673,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             val b = pullB.pull().getOrElse(otherElem)
             if (a == thisElem && b == otherElem) None else Some((a, b))
           }
+
+          override def close: Task[Unit] = pullA.close.flatMap(_ => pullB.close)
         }
       }
     }
@@ -650,18 +692,20 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   }
 
   def groupBy[K](f: Return => K): Task[Map[K, List[Return]]] =
-    task.map { pullR =>
-      val m = new scala.collection.mutable.HashMap[K, scala.collection.mutable.ListBuffer[Return]]
-      var next = pullR.pull()
-      while (next.isDefined) {
-        val r = next.get
-        val k = f(r)
-        val buf = m.getOrElseUpdate(k, scala.collection.mutable.ListBuffer.empty[Return])
-        buf += r
-        next = pullR.pull()
-      }
-      // freeze to the requested shape
-      m.iterator.map { case (k, buf) => k -> buf.toList }.toMap
+    task.flatMap { pullR =>
+      Task {
+        val m = new scala.collection.mutable.HashMap[K, scala.collection.mutable.ListBuffer[Return]]
+        var next = pullR.pull()
+        while (next.isDefined) {
+          val r = next.get
+          val k = f(r)
+          val buf = m.getOrElseUpdate(k, scala.collection.mutable.ListBuffer.empty[Return])
+          buf += r
+          next = pullR.pull()
+        }
+        // freeze to the requested shape
+        m.iterator.map { case (k, buf) => k -> buf.toList }.toMap
+      }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
 
   /**
@@ -675,7 +719,10 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     new Stream[T](
       task.flatMap { pullR =>
         that.task.map { pullT =>
-          () => pullR.pull().orElse(pullT.pull())
+          new Pull[T] {
+            override def pull(): Option[T] = pullR.pull().orElse(pullT.pull())
+            override def close: Task[Unit] = pullR.close.flatMap(_ => pullT.close)
+          }
         }
       }
     )
@@ -762,7 +809,7 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
           case None => Task.pure(acc)
         }
       }
-      foldRec(initial)
+      foldRec(initial).guarantee(pullR.close.handleError(_ => Task.unit))
     }
 
   /**
@@ -836,7 +883,9 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   /**
    * Grabs only the first element or None if the stream is empty.
    */
-  def firstOption: Task[Option[Return]] = task.map(_.pull())
+  def firstOption: Task[Option[Return]] = task.flatMap { pullR =>
+    Task { pullR.pull() }.guarantee(pullR.close.handleError(_ => Task.unit))
+  }
 
   /**
    * Converts the stream to a list.
@@ -844,26 +893,30 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @return a task that produces a list of the values in the stream
    */
   def toList: Task[List[Return]] = {
-    task.map { pullR =>
-      val builder = List.newBuilder[Return]
-      var next = pullR.pull()
-      while (next.isDefined) {
-        builder += next.get
-        next = pullR.pull()
-      }
-      builder.result()
+    task.flatMap { pullR =>
+      Task {
+        val builder = List.newBuilder[Return]
+        var next = pullR.pull()
+        while (next.isDefined) {
+          builder += next.get
+          next = pullR.pull()
+        }
+        builder.result()
+      }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
   }
 
   def toVector: Task[Vector[Return]] = {
-    task.map { pullR =>
-      val builder = Vector.newBuilder[Return]
-      var next = pullR.pull()
-      while (next.isDefined) {
-        builder += next.get
-        next = pullR.pull()
-      }
-      builder.result()
+    task.flatMap { pullR =>
+      Task {
+        val builder = Vector.newBuilder[Return]
+        var next = pullR.pull()
+        while (next.isDefined) {
+          builder += next.get
+          next = pullR.pull()
+        }
+        builder.result()
+      }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
   }
 
@@ -872,12 +925,14 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    *
    * @return a `Task[Int]` representing the total number of entries evaluated
    */
-  def count: Task[Int] = task.map { pullR =>
-    var count = 0
-    while (pullR.pull().isDefined) {
-      count += 1
-    }
-    count
+  def count: Task[Int] = task.flatMap { pullR =>
+    Task {
+      var count = 0
+      while (pullR.pull().isDefined) {
+        count += 1
+      }
+      count
+    }.guarantee(pullR.close.handleError(_ => Task.unit))
   }
 
   def par[T, R >: Return](maxThreads: Int = ParallelStream.DefaultMaxThreads,
@@ -934,7 +989,7 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
 
     tasks.tasksPar.map { _ =>
       throwable.foreach(throw _)
-    }
+    }.guarantee(pull.close.handleError(_ => Task.unit))
   }
 
   def parFold[T](initial: T,
@@ -1072,31 +1127,46 @@ object Stream {
       streams.map { outerPull =>
         val innerQueue = new ConcurrentLinkedQueue[Pull[Return]]()
 
-        () => {
-          @tailrec
-          def loop(): Option[Return] = {
-            val inner = innerQueue.poll()
-            if (inner != null) {
-              inner.pull() match {
-                case some@Some(_) =>
-                  innerQueue.offer(inner)
-                  some
-                case None =>
-                  loop()
-              }
-            } else {
-              outerPull.pull() match {
-                case Some(stream) =>
-                  val p = stream.task.sync()
-                  innerQueue.offer(p)
-                  loop()
-                case None =>
-                  None
+        new Pull[Return] {
+          override def pull(): Option[Return] = {
+            @tailrec
+            def loop(): Option[Return] = {
+              val inner = innerQueue.poll()
+              if (inner != null) {
+                inner.pull() match {
+                  case some@Some(_) =>
+                    innerQueue.offer(inner)
+                    some
+                  case None =>
+                    try inner.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () }
+                    loop()
+                }
+              } else {
+                outerPull.pull() match {
+                  case Some(stream) =>
+                    val p = stream.task.sync()
+                    innerQueue.offer(p)
+                    loop()
+                  case None =>
+                    None
+                }
               }
             }
+
+            loop()
           }
 
-          loop()
+          override def close: Task[Unit] = Task.defer {
+            // Close all pulls we might have enqueued plus outerPull
+            var next = innerQueue.poll()
+            var acc: Task[Unit] = Task.unit
+            while (next != null) {
+              val p = next
+              acc = acc.flatMap(_ => p.close.handleError(_ => Task.unit))
+              next = innerQueue.poll()
+            }
+            acc
+          }.flatMap(_ => outerPull.close.handleError(_ => Task.unit))
         }
       }
     )
@@ -1131,19 +1201,25 @@ object Stream {
       var pos = 0
       var len = 0
 
-      () => {
-        lock.synchronized {
-          if (pos >= len) {
-            len = is.read(buf)
-            pos = 0
+      new Pull[Byte] {
+        override def pull(): Option[Byte] = {
+          lock.synchronized {
+            if (pos >= len) {
+              len = is.read(buf)
+              pos = 0
+            }
+            if (len < 0) {
+              None
+            } else {
+              val b = buf(pos)
+              pos += 1
+              Some(b)
+            }
           }
-          if (len < 0) {
-            None
-          } else {
-            val b = buf(pos)
-            pos += 1
-            Some(b)
-          }
+        }
+
+        override def close: Task[Unit] = Task {
+          try is.close() catch { case _: Throwable => () }
         }
       }
     })

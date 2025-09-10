@@ -75,7 +75,8 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
       }
     }
 
-    loadNext()
+    try loadNext()
+    finally try pull.close.sync() catch { case _: Throwable => () }
   }.start()
 
   // workers

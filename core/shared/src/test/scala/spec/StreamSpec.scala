@@ -15,6 +15,47 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
 
   "Stream" should {
+    "call close on Pull for normal completion and on error" in {
+      @volatile var closed = false
+      val base = Pull.fromList(List(1, 2, 3))
+      val pull = new Pull[Int] {
+        override def pull(): Option[Int] = base.pull()
+        override def close: Task[Unit] = Task { closed = true }
+      }
+      // normal completion
+      Stream(Task.pure(pull)).toList.sync() shouldEqual List(1, 2, 3)
+      closed shouldBe true
+
+      // error path via evalMap that throws
+      closed = false
+      val erring = Stream(Task.pure(new Pull[Int] {
+        private var i = 0
+        override def pull(): Option[Int] = {
+          i += 1
+          if (i == 1) Some(1)
+          else None
+        }
+        override def close: Task[Unit] = Task { closed = true }
+      })).evalMap { _ => Task.error(new RuntimeException("boom")) }
+
+      intercept[RuntimeException] {
+        erring.toList.sync()
+      }
+      closed shouldBe true
+    }
+
+    "close underlying InputStream in fromInputStream" in {
+      var closed = false
+      val is = new java.io.ByteArrayInputStream("abc".getBytes("UTF-8")) {
+        override def close(): Unit = {
+          closed = true
+          super.close()
+        }
+      }
+      val out = Stream.fromInputStream(Task.pure(is)).toList.sync()
+      out.map(_.toChar).mkString shouldEqual "abc"
+      closed shouldBe true
+    }
     "correctly map elements" in {
       val stream = Stream.emits(List(1, 2, 3, 4))
       val result = stream.map(_ * 2).toList.sync()
