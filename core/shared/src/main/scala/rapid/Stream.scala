@@ -1,7 +1,7 @@
 package rapid
 
 import java.io.{BufferedInputStream, File, FileInputStream, InputStream}
-import java.nio.file.Path
+import java.nio.file.{Files, Path}
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
@@ -9,6 +9,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.io.Source
+import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 /**
  * A lazy, pull-based stream abstraction for processing elements with full support for concurrency and composability.
@@ -1178,6 +1179,13 @@ object Stream {
    * @return a new stream that emits Bytes
    */
   def fromPath(path: Path): Stream[Byte] = fromFile(path.toFile)
+
+  /**
+   * Convenience functionality to list the contents of a directory Path.
+   */
+  def listDirectory(directory: Path): Stream[Path] = fromIterator(Task {
+    Files.list(directory).iterator().asScala
+  })
 
   /**
    * Creates a Byte stream from the Java File
