@@ -634,8 +634,24 @@ trait Task[+Return] extends Any {
   /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
    */
-  def toFuture(implicit ec: scala.concurrent.ExecutionContext): scala.concurrent.Future[Return] =
-    scala.concurrent.Future(this.sync())
+  def toFuture(implicit ec: scala.concurrent.ExecutionContext): scala.concurrent.Future[Return] = {
+    val promise = scala.concurrent.Promise[Return]()
+    
+    // Start the task asynchronously via a fiber
+    val fiber = Platform.createFiber(this)
+    
+    // Use a lightweight async execution to complete the promise
+    ec.execute(() => {
+      try {
+        // The fiber's sync() will use work-stealing if available
+        promise.success(fiber.sync())
+      } catch {
+        case e: Throwable => promise.failure(e)
+      }
+    })
+    
+    promise.future
+  }
 }
 
 object Task extends task.UnitTask {

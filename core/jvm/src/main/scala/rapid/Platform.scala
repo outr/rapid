@@ -15,7 +15,8 @@ object Platform extends RapidPlatform {
 
 
   override def createFiber[Return](task: Task[Return]): Fiber[Return] = {
-    // Always use FixedThreadPoolFiber
+    // Always use FixedThreadPoolFiber for now
+    // TODO: Enable WorkStealingFiber once compilation issues are resolved
     new FixedThreadPoolFiber[Return](task)
   }
 
