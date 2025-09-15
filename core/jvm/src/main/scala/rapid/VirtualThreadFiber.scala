@@ -14,12 +14,15 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[R
     .name(s"rapid-${id}")
     .start(() => {
       if (!cancelled) {
-        try {
-          result = Try(task.sync())
-        } catch {
-          case _: InterruptedException if cancelled => result = Failure(new CancellationException("Task was cancelled"))
-          case t: Throwable => result = Failure(t)
-        }
+        // Use the shared optimized execution engine
+        SharedExecutionEngine.executeCallback(
+          task,
+          value => result = Success(value),
+          error => result = Failure(error),
+          None  // VirtualThread doesn't need an executor - it IS the thread
+        )
+      } else {
+        result = Failure(new CancellationException("Task was cancelled"))
       }
     })
 
@@ -57,7 +60,8 @@ object VirtualThreadFiber {
       .ofVirtual()
       .name(s"rapid-vt-${counter.incrementAndGet()}")
       .start(() => {
-        task.sync()
+        // Use the shared optimized execution engine
+        SharedExecutionEngine.executeCallback(task, _ => (), _ => (), None)
       })
   }
 }

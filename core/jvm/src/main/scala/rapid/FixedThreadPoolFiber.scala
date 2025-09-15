@@ -529,97 +529,20 @@ object FixedThreadPoolFiber extends PredictableExecution {
   }
   
   /**
-   * Netty-inspired callback execution pipeline.
-   * All async operations (sleep, compute, compose) use callbacks to avoid blocking.
+   * Delegate to shared execution engine.
+   * Package-private to allow reuse by VirtualThreadFiber.
    */
-  private def executeCallback[Return](
+  private[rapid] def executeCallback[Return](
     task: Task[Return],
     onSuccess: Return => Unit,
     onFailure: Throwable => Unit
   ): Unit = {
-    import rapid.task._
-    
-    // Fast path for synchronous tasks
-    task match {
-      case PureTask(value) =>
-        onSuccess(value)
-        return
-      case _: UnitTask =>
-        onSuccess(().asInstanceOf[Return])
-        return
-      case _ => // Continue with other patterns
-    }
-    
-    task match {
-      // MOST COMMON: FlatMapTask - Optimized for map/flatMap patterns
-      case flatMap: FlatMapTask[_, _] =>
-        flatMap.source match {
-          // HOT PATH: sleep().map() pattern - ultra-optimized
-          case completable: CompletableTask[_] =>
-            completable.onComplete { result =>
-              result match {
-                case scala.util.Success(sourceValue) =>
-                  try {
-                    // Execute forge directly in callback thread for speed
-                    val continuation = flatMap.forge.asInstanceOf[rapid.Forge[Any, Return]](sourceValue)
-                    // Inline common cases to avoid recursive executeCallback overhead
-                    continuation match {
-                      case PureTask(value) => onSuccess(value.asInstanceOf[Return])
-                      case _: UnitTask => onSuccess(().asInstanceOf[Return])
-                      case _ => executeCallback(continuation, onSuccess, onFailure)
-                    }
-                  } catch {
-                    case error: Throwable => onFailure(error)
-                  }
-                case scala.util.Failure(error) => onFailure(error)
-              }
-            }
-          // Regular FlatMapTask - general case
-          case _ =>
-            executeCallback(
-              flatMap.source.asInstanceOf[Task[Any]], 
-              sourceResult => {
-                try {
-                  val continuation = flatMap.forge.asInstanceOf[rapid.Forge[Any, Return]](sourceResult)
-                  executeCallback(continuation, onSuccess, onFailure)
-                } catch {
-                  case error: Throwable => onFailure(error)
-                }
-              },
-              onFailure
-            )
-        }
-      
-      // CompletableTask - Pure async callback (like Netty ChannelFuture)
-      case completable: CompletableTask[_] =>
-        completable.onComplete { result =>
-          result match {
-            case scala.util.Success(value) => onSuccess(value.asInstanceOf[Return])
-            case scala.util.Failure(throwable) => onFailure(throwable)
-          }
-        }
-      
-      // SleepTask - Use TimerWheel callback directly (avoiding sync() blocking)
-      case SleepTask(duration) =>
-        TimerWheel.schedule(duration, () => {
-          onSuccess(().asInstanceOf[Return])
-        })
-      
-      // Error handling - Like Netty exception propagation
-      case ErrorTask(throwable) =>
-        onFailure(throwable)
-      
-      // Complex tasks - Fall back to trampoline
-      case _ =>
-        executeOnVirtualThread(() => {
-          try {
-            val result = task.sync()
-            onSuccess(result)
-          } catch {
-            case error: Throwable => onFailure(error)
-          }
-        })
-    }
+    SharedExecutionEngine.executeCallback(
+      task, 
+      onSuccess, 
+      onFailure,
+      Some(executeOnVirtualThread)
+    )
   }
   
   private def recordExecutionTime(taskType: String, nanos: Long): Unit = {
