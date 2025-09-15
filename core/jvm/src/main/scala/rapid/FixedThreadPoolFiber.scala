@@ -286,6 +286,6 @@ object FixedThreadPoolFiber {
     virtualExecutor.shutdown()
   }
   
-  // Accessor for JDKScheduledSleep to use the scheduled executor
+  // Accessor for JDKScheduledSleep to use the scheduled executor service
   def scheduledExecutorService: ScheduledExecutorService = scheduledExecutor
 }
