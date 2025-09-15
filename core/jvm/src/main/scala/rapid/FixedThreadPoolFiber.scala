@@ -46,30 +46,21 @@ object FixedThreadPoolFiber {
   
   private lazy val threadFactory = createThreadFactory("rapid-ft")
   
-  // Ultra-fast virtual thread executor - reuses virtual thread infrastructure
-  // Eliminates per-task virtual thread creation overhead  
+  // Virtual thread executor for async tasks
   private lazy val virtualExecutor = {
     val threadFactory = Thread.ofVirtual().factory()
     java.util.concurrent.Executors.newThreadPerTaskExecutor(threadFactory)
   }
   
-  @inline private def executeOnVirtualThread(task: () => Unit): Unit = {
-    // Direct execution without pooling - simpler and faster for CPU-bound tasks
-    virtualExecutor.execute(new Runnable {
-      override def run(): Unit = task()
-    })
-  }
   
-  // Adaptive thread pool based on CPU cores (legacy - mainly for scheduledExecutor now)
+  // Thread pool for task execution
   private[rapid] lazy val executor = {
     Executors.newFixedThreadPool(defaultPoolSize, threadFactory)
   }
   
-  // Made accessible for JDKScheduledSleep implementation
-  // Adaptive scheduler based on CPU cores
+  // Scheduler for delayed tasks
   lazy val scheduledExecutor: ScheduledExecutorService = {
-    // Keep pool size small to minimize memory overhead
-    // JVM ScheduledThreadPool is not designed for millions of timers
+    // Use small pool size for efficiency
     Executors.newScheduledThreadPool(defaultPoolSize, createThreadFactory("rapid-scheduler"))
   }
   
@@ -79,6 +70,21 @@ object FixedThreadPoolFiber {
     val future = new CompletableFuture[T]()
     future.completeExceptionally(error)
     future
+  }
+  
+  @inline private def executeContinuation[Return](continuation: Task[Return]): Future[Return] = {
+    continuation match {
+      case PureTask(result) =>
+        // Fast path for pure values - but still async
+        CompletableFuture.completedFuture(result)
+      case _ =>
+        // Submit to executor for proper async execution
+        val javaFuture = new CompletableFuture[Return]()
+        executor.submit(new Runnable {
+          def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+        })
+        javaFuture
+    }
   }
   
   private def create[Return](task: Task[Return]): Future[Return] = {
@@ -187,19 +193,7 @@ object FixedThreadPoolFiber {
           case pure: PureTask[_] =>
             try {
               val continuation = direct.asInstanceOf[DirectFlatMapTask[Any, Return]].f(pure.value)
-              // Keep fast construction but ensure async execution
-              continuation match {
-                case PureTask(result) =>
-                  // Fast path for pure values - but still async
-                  CompletableFuture.completedFuture(result)
-                case _ =>
-                  // Submit to executor for proper async execution
-                  val javaFuture = new CompletableFuture[Return]()
-                  executor.submit(new Runnable {
-                    def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
-                  })
-                  javaFuture
-              }
+              executeContinuation(continuation)
             } catch {
               case error: Throwable => failedFuture[Return](error)
             }
@@ -208,19 +202,7 @@ object FixedThreadPoolFiber {
           case _: UnitTask =>
             try {
               val continuation = direct.asInstanceOf[DirectFlatMapTask[Any, Return]].f(())
-              // Keep fast construction but ensure async execution
-              continuation match {
-                case PureTask(result) =>
-                  // Fast path for pure values - but still async
-                  CompletableFuture.completedFuture(result)
-                case _ =>
-                  // Submit to executor for proper async execution
-                  val javaFuture = new CompletableFuture[Return]()
-                  executor.submit(new Runnable {
-                    def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
-                  })
-                  javaFuture
-              }
+              executeContinuation(continuation)
             } catch {
               case error: Throwable => failedFuture[Return](error)
             }
@@ -291,7 +273,9 @@ object FixedThreadPoolFiber {
       task, 
       onSuccess, 
       onFailure,
-      Some(executeOnVirtualThread)
+      Some((task: () => Unit) => virtualExecutor.execute(new Runnable {
+        override def run(): Unit = task()
+      }))
     )
   }
   
