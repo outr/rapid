@@ -28,6 +28,7 @@ trait Task[+Return] extends Any {
     var stack: java.util.ArrayDeque[Any] = null
     var current: Any = this
     var previous: Any = ()
+    var batchIndex: Int = 0  // Batching counter for async fairness
     
     // Cache monitor reference to avoid volatile read overhead in tight loops
     val monitor = Task.monitor
@@ -125,12 +126,27 @@ trait Task[+Return] extends Any {
               val value = source.asInstanceOf[PureTask[Any]].value
               current = func(value)
             } else if (source.isInstanceOf[SingleTask[_]]) {
-              // DirectFlatMap with SingleTask - execute inline
-              try {
-                val result = source.asInstanceOf[SingleTask[Any]].f()
-                current = func(result)
-              } catch {
-                case e: Throwable => current = ErrorTask(e)
+              // DirectFlatMap with SingleTask - batching for fairness and stack safety
+              val BatchSize = 512  // Same as cats-effect for fairness
+              
+              if (batchIndex < BatchSize) {
+                batchIndex += 1
+                try {
+                  val result = source.asInstanceOf[SingleTask[Any]].f()
+                  current = func(result)
+                } catch {
+                  case e: Throwable => current = ErrorTask(e)
+                }
+              } else {
+                // Reset batch and yield thread briefly for fairness
+                batchIndex = 0
+                Thread.`yield`()  // Allow other threads to run
+                try {
+                  val result = source.asInstanceOf[SingleTask[Any]].f()
+                  current = func(result)
+                } catch {
+                  case e: Throwable => current = ErrorTask(e)
+                }
               }
             } else {
               // Default handling for other source types
