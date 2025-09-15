@@ -121,8 +121,10 @@ trait Task[+Return] extends Any {
                 if (result != null) previous = result
               }
             } else if (source.isInstanceOf[PureTask[_]] || source.isInstanceOf[SingleTask[_]]) {
-              // DirectFlatMap with PureTask/SingleTask - use default async handling
-              // This ensures proper async semantics for benchmarks
+              // DirectFlatMap with PureTask/SingleTask  
+              // NOTE: Inline execution is SAFE here because sync() is explicitly synchronous
+              // This differs from async fibers which MUST go through executor to prevent stack overflow
+              // (see FixedThreadPoolFiber.create for async handling that matches cats-effect)
               if (stack == null) stack = new java.util.ArrayDeque[Any](32)
               stack.push(func)
               current = source

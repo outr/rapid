@@ -88,18 +88,27 @@ object FixedThreadPoolFiber {
   }
   
   private def create[Return](task: Task[Return]): Future[Return] = {
-    // Always ensure at least one async hop to prevent stack overflow
-    // Even for pure/unit tasks, submit to executor for consistent async semantics
+    // CRITICAL: Always ensure at least one async hop to prevent stack overflow
+    // This matches cats-effect's approach where IO.async forces a thread shift
+    // to break the synchronous call chain and prevent stack overflow in deep
+    // recursive operations like flatMap chains.
+    // 
+    // Unlike sync() which can optimize with inline execution for performance,
+    // async operations MUST go through the executor to ensure stack safety.
+    // This separation allows us to have both:
+    // - Safe async execution (no stack overflow)
+    // - Fast sync execution (inline optimizations in sync() method)
     task match {
       case SleepTask(d) =>
-        // Sleep can be handled directly with scheduler
+        // Sleep can be handled directly with scheduler (still async)
         val javaFuture = new CompletableFuture[Return]()
         scheduledExecutor.schedule(new Runnable {
           def run(): Unit = javaFuture.complete(().asInstanceOf[Return])
         }, d.toMillis, TimeUnit.MILLISECONDS)
         javaFuture
       case _ =>
-        // Always go through executor for async hop
+        // Always go through executor for async hop - even for PureTask/UnitTask
+        // This prevents stack overflow in deep flatMap chains
         val javaFuture = new CompletableFuture[Return]()
         executor.submit(new Runnable {
           def run(): Unit = executeCallback(task, javaFuture.complete, javaFuture.completeExceptionally)
