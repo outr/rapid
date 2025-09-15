@@ -2,7 +2,7 @@ package rapid
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-import java.util.concurrent.{ThreadPoolExecutor, TimeUnit, LinkedBlockingQueue, Executors, Executor}
+import java.util.concurrent.{ThreadPoolExecutor, TimeUnit, LinkedBlockingQueue, Executors, Executor, CompletableFuture}
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -11,13 +11,42 @@ object Platform extends RapidPlatform {
 
   override def supportsCancel: Boolean = true
   
+  /**
+   * Check if cooperative yielding is supported.
+   * Returns true if we're in a work-stealing worker thread.
+   */
+  override def supportsCooperativeYielding: Boolean = {
+    WorkStealingContext.isInWorkerThread
+  }
+  
+  /**
+   * Perform a cooperative sync operation on a CompletableFuture.
+   * If in a worker thread, yields cooperatively. Otherwise blocks.
+   */
+  override def cooperativeSync[T](future: CompletableFuture[T]): T = {
+    if (WorkStealingContext.isInWorkerThread) {
+      CooperativeYielding.cooperativeFuture(future)
+    } else {
+      // Default blocking behavior
+      try {
+        future.get()
+      } catch {
+        case ex: java.util.concurrent.ExecutionException =>
+          throw ex.getCause
+      }
+    }
+  }
+  
 
 
 
   override def createFiber[Return](task: Task[Return]): Fiber[Return] = {
-    // Always use FixedThreadPoolFiber for now
-    // TODO: Enable WorkStealingFiber once compilation issues are resolved
-    new FixedThreadPoolFiber[Return](task)
+    // Check if work-stealing is enabled via system property
+    if (sys.props.getOrElse("rapid.work-stealing", "false").toBoolean) {
+      new WorkStealingFiber[Return](task)
+    } else {
+      new FixedThreadPoolFiber[Return](task)
+    }
   }
 
   override def fireAndForget(task: Task[_]): Unit = {

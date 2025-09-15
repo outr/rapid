@@ -21,11 +21,11 @@ object WorkStealingPool {
     Runtime.getRuntime.availableProcessors().toString).toInt, 2)
   
   // Worker threads
-  private val workers = new Array[Worker](numWorkers)
+  val workers = new Array[Worker](numWorkers)
   private val workersInitialized = new AtomicBoolean(false)
   
   // Global submission queue for external threads
-  private val globalQueue = new ConcurrentLinkedQueue[TaskWrapper]()
+  val globalQueue = new ConcurrentLinkedQueue[TaskWrapper]()
   
   // Statistics
   private val totalTasks = new AtomicLong(0)
@@ -76,27 +76,34 @@ object WorkStealingPool {
     override def run(): Unit = {
       // Register this thread as a worker
       workerThreadLocal.set(this)
+      // Set work-stealing context for this thread
+      WorkStealingContext.setWorker(this)
       
-      while (!isInterrupted) {
-        val task = getNextTask()
-        
-        if (task != null) {
-          shouldPark = false
-          try {
-            task.run()
-            tasksProcessed.incrementAndGet()
-          } catch {
-            case _: InterruptedException => 
-              Thread.currentThread().interrupt()
-              return
-            case e: Throwable =>
-              // Log error but continue processing
-              System.err.println(s"Worker $id error processing task: $e")
+      try {
+        while (!isInterrupted) {
+          val task = getNextTask()
+          
+          if (task != null) {
+            shouldPark = false
+            try {
+              task.run()
+              tasksProcessed.incrementAndGet()
+            } catch {
+              case _: InterruptedException => 
+                Thread.currentThread().interrupt()
+                return
+              case e: Throwable =>
+                // Log error but continue processing
+                System.err.println(s"Worker $id error processing task: $e")
+            }
+          } else {
+            // No work available - park this worker
+            parkWorker()
           }
-        } else {
-          // No work available - park this worker
-          parkWorker()
         }
+      } finally {
+        // Clear context when worker terminates
+        WorkStealingContext.clearWorker()
       }
     }
     
@@ -220,6 +227,11 @@ object WorkStealingPool {
    * Get the current worker thread, if any.
    */
   def currentWorker: Option[Worker] = Option(workerThreadLocal.get())
+  
+  /**
+   * Check if currently in a worker thread.
+   */
+  def isInWorkerThread: Boolean = workerThreadLocal.get() != null
   
   /**
    * Submit a task for execution.

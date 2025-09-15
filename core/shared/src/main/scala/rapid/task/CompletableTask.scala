@@ -64,13 +64,18 @@ class CompletableTask[Return] extends Task[Return] {
   }
 
   override def sync(): Return = {
-    // Direct CompletableFuture get() - leverages Virtual Thread efficiency
-    // No new trampoline created, just efficient continuation
-    try {
-      future.get()
-    } catch {
-      case ex: java.util.concurrent.ExecutionException =>
-        throw ex.getCause
+    // Use cooperative yielding if available (when in work-stealing thread)
+    if (rapid.Platform.supportsCooperativeYielding) {
+      rapid.Platform.cooperativeSync(future)
+    } else {
+      // Direct CompletableFuture get() - leverages Virtual Thread efficiency
+      // No new trampoline created, just efficient continuation
+      try {
+        future.get()
+      } catch {
+        case ex: java.util.concurrent.ExecutionException =>
+          throw ex.getCause
+      }
     }
   }
 
