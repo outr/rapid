@@ -33,14 +33,18 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends AbstractFiber
 
 object FixedThreadPoolFiber {
   
-  private lazy val threadFactory = new ThreadFactory {
+  private val defaultPoolSize = math.max(Runtime.getRuntime.availableProcessors(), 4)
+  
+  private def createThreadFactory(prefix: String): ThreadFactory = new ThreadFactory {
     override def newThread(r: Runnable): Thread = {
       val thread = new Thread(r)
-      thread.setName(s"rapid-ft-${counter.incrementAndGet()}")
+      thread.setName(s"$prefix-${counter.incrementAndGet()}")
       thread.setDaemon(true)
       thread
     }
   }
+  
+  private lazy val threadFactory = createThreadFactory("rapid-ft")
   
   // Ultra-fast virtual thread executor - reuses virtual thread infrastructure
   // Eliminates per-task virtual thread creation overhead  
@@ -58,8 +62,7 @@ object FixedThreadPoolFiber {
   
   // Adaptive thread pool based on CPU cores (legacy - mainly for scheduledExecutor now)
   private[rapid] lazy val executor = {
-    val poolSize = math.max(Runtime.getRuntime.availableProcessors(), 4)
-    Executors.newFixedThreadPool(poolSize, threadFactory)
+    Executors.newFixedThreadPool(defaultPoolSize, threadFactory)
   }
   
   // Made accessible for JDKScheduledSleep implementation
@@ -67,23 +70,16 @@ object FixedThreadPoolFiber {
   lazy val scheduledExecutor: ScheduledExecutorService = {
     // Keep pool size small to minimize memory overhead
     // JVM ScheduledThreadPool is not designed for millions of timers
-    val poolSize = math.max(Runtime.getRuntime.availableProcessors(), 4)
-    
-    Executors.newScheduledThreadPool(
-      poolSize,
-      new ThreadFactory {
-        override def newThread(r: Runnable): Thread = {
-          val thread = new Thread(r)
-          thread.setName(s"rapid-scheduler-${counter.incrementAndGet()}")
-          thread.setDaemon(true)
-          thread
-        }
-      }
-    )
+    Executors.newScheduledThreadPool(defaultPoolSize, createThreadFactory("rapid-scheduler"))
   }
   
   private val counter = new AtomicLong(0L)
   
+  @inline private def failedFuture[T](error: Throwable): CompletableFuture[T] = {
+    val future = new CompletableFuture[T]()
+    future.completeExceptionally(error)
+    future
+  }
   
   private def create[Return](task: Task[Return]): Future[Return] = {
     // Fast path for synchronous tasks that can be executed inline
@@ -155,10 +151,7 @@ object FixedThreadPoolFiber {
               // Recursively unwrap the result with depth tracking - DON'T create intermediate future
               createWithDepth(continuation, depth + 1)
             } catch {
-              case error: Throwable =>
-                val javaFuture = new CompletableFuture[Return]()
-                javaFuture.completeExceptionally(error)
-                javaFuture
+              case error: Throwable => failedFuture[Return](error)
             }
             
           // UNWRAPPING: FlatMapTask(UnitTask) - common from .map on unit
@@ -169,10 +162,7 @@ object FixedThreadPoolFiber {
               // Recursively unwrap the result with depth tracking - DON'T create intermediate future
               createWithDepth(continuation, depth + 1)
             } catch {
-              case error: Throwable =>
-                val javaFuture = new CompletableFuture[Return]()
-                javaFuture.completeExceptionally(error)
-                javaFuture
+              case error: Throwable => failedFuture[Return](error)
             }
             
           case _ =>
@@ -211,10 +201,7 @@ object FixedThreadPoolFiber {
                   javaFuture
               }
             } catch {
-              case error: Throwable =>
-                val javaFuture = new CompletableFuture[Return]()
-                javaFuture.completeExceptionally(error)
-                javaFuture
+              case error: Throwable => failedFuture[Return](error)
             }
             
           // DirectFlatMapTask(UnitTask) - common pattern
@@ -235,10 +222,7 @@ object FixedThreadPoolFiber {
                   javaFuture
               }
             } catch {
-              case error: Throwable =>
-                val javaFuture = new CompletableFuture[Return]()
-                javaFuture.completeExceptionally(error)
-                javaFuture
+              case error: Throwable => failedFuture[Return](error)
             }
             
           // DirectFlatMapTask(SleepTask) - optimize sleep chains
