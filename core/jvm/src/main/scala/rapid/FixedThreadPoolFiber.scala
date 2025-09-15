@@ -88,21 +88,23 @@ object FixedThreadPoolFiber {
   }
   
   private def create[Return](task: Task[Return]): Future[Return] = {
-    // Fast path for synchronous tasks that can be executed inline
+    // Always ensure at least one async hop to prevent stack overflow
+    // Even for pure/unit tasks, submit to executor for consistent async semantics
     task match {
-      case PureTask(value) => 
-        CompletableFuture.completedFuture(value)
-      case _: UnitTask => 
-        CompletableFuture.completedFuture(().asInstanceOf[Return])
       case SleepTask(d) =>
-        // Sleep can be handled directly with TimerWheel
+        // Sleep can be handled directly with scheduler
         val javaFuture = new CompletableFuture[Return]()
         scheduledExecutor.schedule(new Runnable {
           def run(): Unit = javaFuture.complete(().asInstanceOf[Return])
         }, d.toMillis, TimeUnit.MILLISECONDS)
         javaFuture
       case _ =>
-        createWithDepth(task, 0)
+        // Always go through executor for async hop
+        val javaFuture = new CompletableFuture[Return]()
+        executor.submit(new Runnable {
+          def run(): Unit = executeCallback(task, javaFuture.complete, javaFuture.completeExceptionally)
+        })
+        javaFuture
     }
   }
   

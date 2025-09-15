@@ -208,10 +208,12 @@ trait Task[+Return] extends Any {
   /**
    * Starts the task and returns a `Fiber` representing the running task.
    */
-  def start: Task[Fiber[Return]] = Task {
+  def start: Task[Fiber[Return]] = {
+    // Create fiber immediately (which starts async execution)
     val f = Platform.createFiber(this)
     if (Task.monitor != null) Task.monitor.fiberCreated(f, this)
-    f
+    // Return pure task containing the already-running fiber
+    Task.pure(f)
   }
 
   /**
