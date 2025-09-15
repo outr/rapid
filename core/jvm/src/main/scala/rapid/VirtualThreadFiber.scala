@@ -7,7 +7,8 @@ import scala.util.{Failure, Success, Try}
 class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[Return] {
   @volatile private var result: Try[Return] = _
   
-  override val id: Long = VirtualThreadFiber.counter.incrementAndGet()
+  // Use thread-local ID generator to eliminate CAS contention (same as FixedThreadPoolFiber)
+  override val id: Long = FiberIdGenerator.nextId()
 
   private val thread = Thread
     .ofVirtual()
@@ -53,12 +54,12 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[R
 }
 
 object VirtualThreadFiber {
-  private val counter = new AtomicLong(0L)
+  // Removed - now using FiberIdGenerator instead
 
   def fireAndForget(task: Task[_]): Unit = {
     Thread
       .ofVirtual()
-      .name(s"rapid-vt-${counter.incrementAndGet()}")
+      .name(s"rapid-vt-${FiberIdGenerator.nextId()}")
       .start(() => {
         // Use the shared optimized execution engine
         SharedExecutionEngine.executeCallback(task, _ => (), _ => (), None)
