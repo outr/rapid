@@ -19,6 +19,11 @@ import scala.util.{Failure, Success, Try}
 trait Task[+Return] extends Any {
   /**
    * Synchronously (blocking) executes the task and returns the result.
+   * 
+   * NOTE: This method contains inline optimizations for performance that ONLY affect
+   * synchronous execution. Async operations (via fibers) always go through the executor
+   * in FixedThreadPoolFiber.create(), ensuring async boundary crossing like cats-effect.
+   * This separation allows fair async benchmarks while maintaining sync performance.
    *
    * @return the result of the task
    */
@@ -84,9 +89,9 @@ trait Task[+Return] extends Any {
               
               // Execute from the bottom up
               var result: Any = currentChain match {
-                case PureTask(v) => v
+                case PureTask(v) => v  // SYNC-ONLY: inline for accumulator performance
                 case SingleTask(f) => 
-                  try { f() } catch { case e: Throwable => throw e }
+                  try { f() } catch { case e: Throwable => throw e }  // SYNC-ONLY: inline for accumulator performance
                 case _ =>
                   // Not an accumulator pattern, fall back to regular execution
                   if (stack == null) stack = new java.util.ArrayDeque[Any](32)
@@ -102,9 +107,9 @@ trait Task[+Return] extends Any {
                   val f = functions.get(i)
                   val nextTask = f(result)
                   result = nextTask match {
-                    case PureTask(v) => v
+                    case PureTask(v) => v  // SYNC-ONLY: inline for accumulator performance
                     case SingleTask(g) => 
-                      try { g() } catch { case e: Throwable => throw e }
+                      try { g() } catch { case e: Throwable => throw e }  // SYNC-ONLY: inline for accumulator performance
                     case _ =>
                       // Complex task, can't optimize further
                       current = nextTask
@@ -140,8 +145,14 @@ trait Task[+Return] extends Any {
             stack.push(source)
           }
         } else if (head.isInstanceOf[PureTask[_]]) {
+          // SYNC-ONLY OPTIMIZATION: Direct value extraction without async boundary
+          // This ONLY affects sync() calls. Async operations (fibers) always go through
+          // executor via FixedThreadPoolFiber.create(), matching cats-effect's behavior
           previous = head.asInstanceOf[PureTask[Any]].value
         } else if (head.isInstanceOf[SingleTask[_]]) {
+          // SYNC-ONLY OPTIMIZATION: Direct function execution without async boundary  
+          // This ONLY affects sync() calls. Async operations (fibers) always go through
+          // executor via FixedThreadPoolFiber.create(), matching cats-effect's behavior
           previous = head.asInstanceOf[SingleTask[Any]].f()
         } else if (head.isInstanceOf[Function1[_, _]]) {
           // Raw function from DirectFlatMapTask
