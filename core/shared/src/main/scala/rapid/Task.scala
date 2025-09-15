@@ -672,9 +672,9 @@ object Task extends task.UnitTask {
     case b: Boolean => 
       CommonTasks.pureBoolean(b).asInstanceOf[Task[T]]
     case null => 
-      CommonTasks.PURE_NULL.asInstanceOf[Task[T]]
+      CommonTasks.pureNull.asInstanceOf[Task[T]]
     case "" => 
-      CommonTasks.PURE_EMPTY_STRING.asInstanceOf[Task[T]]
+      CommonTasks.pureEmptyString.asInstanceOf[Task[T]]
     case _ => 
       val t = PureTask(value)
       if (monitor != null) monitor.created(t)

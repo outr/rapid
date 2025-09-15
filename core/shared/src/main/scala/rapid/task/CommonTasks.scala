@@ -8,23 +8,23 @@ import rapid.Task
  */
 object CommonTasks {
   // Pre-allocated PureTask instances for common values
-  val PURE_ZERO: PureTask[Int] = PureTask(0)
-  val PURE_ONE: PureTask[Int] = PureTask(1)
-  val PURE_MINUS_ONE: PureTask[Int] = PureTask(-1)
-  val PURE_TRUE: PureTask[Boolean] = PureTask(true)
-  val PURE_FALSE: PureTask[Boolean] = PureTask(false)
-  val PURE_EMPTY_STRING: PureTask[String] = PureTask("")
-  val PURE_NULL: PureTask[Null] = PureTask(null)
+  val pureZero: PureTask[Int] = PureTask(0)
+  val pureOne: PureTask[Int] = PureTask(1)
+  val pureMinusOne: PureTask[Int] = PureTask(-1)
+  val pureTrue: PureTask[Boolean] = PureTask(true)
+  val pureFalse: PureTask[Boolean] = PureTask(false)
+  val pureEmptyString: PureTask[String] = PureTask("")
+  val pureNull: PureTask[Null] = PureTask(null)
   
   // Pre-allocated SingleTask for common computations
-  val SINGLE_ZERO: SingleTask[Int] = SingleTask(() => 0)
-  val SINGLE_ONE: SingleTask[Int] = SingleTask(() => 1)
+  val singleZero: SingleTask[Int] = SingleTask(() => 0)
+  val singleOne: SingleTask[Int] = SingleTask(() => 1)
   
   // Reusable function objects (stateless)
-  val IDENTITY_FUNCTION: Any => Any = (x: Any) => x
-  val TO_STRING_FUNCTION: Any => String = (x: Any) => x.toString
-  val INCREMENT_INT: Int => Int = (x: Int) => x + 1
-  val DECREMENT_INT: Int => Int = (x: Int) => x - 1
+  val identityFunction: Any => Any = (x: Any) => x
+  val toStringFunction: Any => String = (x: Any) => x.toString
+  val incrementInt: Int => Int = (x: Int) => x + 1
+  val decrementInt: Int => Int = (x: Int) => x - 1
   
   /**
    * Get a cached PureTask for small integers (-128 to 127)
@@ -44,51 +44,51 @@ object CommonTasks {
    * Get a cached PureTask for boolean values
    */
   def pureBoolean(value: Boolean): PureTask[Boolean] = {
-    if (value) PURE_TRUE else PURE_FALSE
+    if (value) pureTrue else pureFalse
   }
   
   // Pre-allocated common exceptions
-  lazy val ERROR_NULL_POINTER: ErrorTask[Nothing] = ErrorTask(new NullPointerException())
-  lazy val ERROR_INDEX_OUT_OF_BOUNDS: ErrorTask[Nothing] = ErrorTask(new IndexOutOfBoundsException())
-  lazy val ERROR_ILLEGAL_ARGUMENT: ErrorTask[Nothing] = ErrorTask(new IllegalArgumentException())
-  lazy val ERROR_ILLEGAL_STATE: ErrorTask[Nothing] = ErrorTask(new IllegalStateException())
-  lazy val ERROR_UNSUPPORTED_OPERATION: ErrorTask[Nothing] = ErrorTask(new UnsupportedOperationException())
+  lazy val errorNullPointer: ErrorTask[Nothing] = ErrorTask(new NullPointerException())
+  lazy val errorIndexOutOfBounds: ErrorTask[Nothing] = ErrorTask(new IndexOutOfBoundsException())
+  lazy val errorIllegalArgument: ErrorTask[Nothing] = ErrorTask(new IllegalArgumentException())
+  lazy val errorIllegalState: ErrorTask[Nothing] = ErrorTask(new IllegalStateException())
+  lazy val errorUnsupportedOperation: ErrorTask[Nothing] = ErrorTask(new UnsupportedOperationException())
   
   /**
    * Reusable empty collections
    */
-  val PURE_EMPTY_LIST: PureTask[List[Nothing]] = PureTask(List.empty)
-  val PURE_EMPTY_VECTOR: PureTask[Vector[Nothing]] = PureTask(Vector.empty)
-  val PURE_EMPTY_MAP: PureTask[Map[Nothing, Nothing]] = PureTask(Map.empty)
-  val PURE_EMPTY_SET: PureTask[Set[Nothing]] = PureTask(Set.empty)
-  val PURE_EMPTY_OPTION: PureTask[Option[Nothing]] = PureTask(None)
+  val pureEmptyList: PureTask[List[Nothing]] = PureTask(List.empty)
+  val pureEmptyVector: PureTask[Vector[Nothing]] = PureTask(Vector.empty)
+  val pureEmptyMap: PureTask[Map[Nothing, Nothing]] = PureTask(Map.empty)
+  val pureEmptySet: PureTask[Set[Nothing]] = PureTask(Set.empty)
+  val pureEmptyOption: PureTask[Option[Nothing]] = PureTask(None)
   
   /**
    * Common Option values
    */
-  val PURE_SOME_TRUE: PureTask[Option[Boolean]] = PureTask(Some(true))
-  val PURE_SOME_FALSE: PureTask[Option[Boolean]] = PureTask(Some(false))
+  val pureSomeTrue: PureTask[Option[Boolean]] = PureTask(Some(true))
+  val pureSomeFalse: PureTask[Option[Boolean]] = PureTask(Some(false))
   
   /**
    * Common numeric values beyond -128 to 127
    */
-  val PURE_MAX_INT: PureTask[Int] = PureTask(Int.MaxValue)
-  val PURE_MIN_INT: PureTask[Int] = PureTask(Int.MinValue)
-  val PURE_THOUSAND: PureTask[Int] = PureTask(1000)
-  val PURE_MILLION: PureTask[Int] = PureTask(1000000)
+  val pureMaxInt: PureTask[Int] = PureTask(Int.MaxValue)
+  val pureMinInt: PureTask[Int] = PureTask(Int.MinValue)
+  val pureThousand: PureTask[Int] = PureTask(1000)
+  val pureMillion: PureTask[Int] = PureTask(1000000)
   
   /**
    * Common Try wrappers for attempt()
    */
   import scala.util.{Try, Success, Failure}
   
-  val TRY_SUCCESS_UNIT: Try[Unit] = Success(())
-  val TRY_SUCCESS_TRUE: Try[Boolean] = Success(true)
-  val TRY_SUCCESS_FALSE: Try[Boolean] = Success(false)
-  val TRY_SUCCESS_ZERO: Try[Int] = Success(0)
-  val TRY_SUCCESS_ONE: Try[Int] = Success(1)
-  val TRY_SUCCESS_EMPTY_STRING: Try[String] = Success("")
-  val TRY_SUCCESS_NONE: Try[Option[Nothing]] = Success(None)
+  val trySuccessUnit: Try[Unit] = Success(())
+  val trySuccessTrue: Try[Boolean] = Success(true)
+  val trySuccessFalse: Try[Boolean] = Success(false)
+  val trySuccessZero: Try[Int] = Success(0)
+  val trySuccessOne: Try[Int] = Success(1)
+  val trySuccessEmptyString: Try[String] = Success("")
+  val trySuccessNone: Try[Option[Nothing]] = Success(None)
   
   // Cache for small integer Success values
   private val tryIntCache: Array[Try[Int]] = Array.tabulate(256)(i => Success(i - 128))
@@ -105,11 +105,11 @@ object CommonTasks {
    * Get cached PureTask[Try[T]] for common values
    */
   def pureTry[T](value: Try[T]): PureTask[Try[T]] = value match {
-    case TRY_SUCCESS_UNIT => PureTask(TRY_SUCCESS_UNIT).asInstanceOf[PureTask[Try[T]]]
-    case TRY_SUCCESS_TRUE => PureTask(TRY_SUCCESS_TRUE).asInstanceOf[PureTask[Try[T]]]
-    case TRY_SUCCESS_FALSE => PureTask(TRY_SUCCESS_FALSE).asInstanceOf[PureTask[Try[T]]]
-    case TRY_SUCCESS_ZERO => PureTask(TRY_SUCCESS_ZERO).asInstanceOf[PureTask[Try[T]]]
-    case TRY_SUCCESS_ONE => PureTask(TRY_SUCCESS_ONE).asInstanceOf[PureTask[Try[T]]]
+    case `trySuccessUnit` => PureTask(trySuccessUnit).asInstanceOf[PureTask[Try[T]]]
+    case `trySuccessTrue` => PureTask(trySuccessTrue).asInstanceOf[PureTask[Try[T]]]
+    case `trySuccessFalse` => PureTask(trySuccessFalse).asInstanceOf[PureTask[Try[T]]]
+    case `trySuccessZero` => PureTask(trySuccessZero).asInstanceOf[PureTask[Try[T]]]
+    case `trySuccessOne` => PureTask(trySuccessOne).asInstanceOf[PureTask[Try[T]]]
     case Success(i: Int) if i >= -128 && i <= 127 => 
       PureTask(tryInt(i)).asInstanceOf[PureTask[Try[T]]]
     case _ => PureTask(value)

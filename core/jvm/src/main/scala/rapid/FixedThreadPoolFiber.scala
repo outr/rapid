@@ -287,5 +287,5 @@ object FixedThreadPoolFiber {
   }
   
   // Accessor for JDKScheduledSleep to use the scheduled executor
-  def getScheduledExecutor(): ScheduledExecutorService = scheduledExecutor
+  def scheduledExecutorService: ScheduledExecutorService = scheduledExecutor
 }

@@ -203,7 +203,7 @@ class TimerWheel {
     callbackExecutor.shutdown()
   }
   
-  def getStatistics: String = {
+  def statistics: String = {
     val overflow = overflowLock.synchronized { overflowQueue.size() }
     s"Total timers: ${totalTimers.get()}, Expired: ${expiredTimers.get()}, Overflow: $overflow"
   }
@@ -221,5 +221,5 @@ object TimerWheel {
   
   def shutdown(): Unit = instance.shutdown()
   
-  def getStatistics: String = instance.getStatistics
+  def statistics: String = instance.statistics
 }
