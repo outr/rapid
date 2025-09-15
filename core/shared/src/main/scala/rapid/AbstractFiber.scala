@@ -1,6 +1,6 @@
 package rapid
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{TimeUnit, ExecutionException}
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -17,7 +17,8 @@ abstract class AbstractFiber[Return] extends Fiber[Return] with Blockable[Return
     try {
       doAwait(duration.toMillis, TimeUnit.MILLISECONDS)
     } catch {
-      case e: Throwable => throw ExceptionUtils.unwrapExecutionException(e)
+      case e: ExecutionException if e.getCause != null => throw e.getCause
+      case e: Throwable => throw e
     }
   }
   
@@ -32,7 +33,12 @@ abstract class AbstractFiber[Return] extends Fiber[Return] with Blockable[Return
    * Subclasses should implement doSync for their specific synchronization logic.
    */
   override def sync(): Return = {
-    ExceptionUtils.handleFutureException(doSync())
+    try {
+      doSync()
+    } catch {
+      case e: ExecutionException if e.getCause != null => throw e.getCause
+      case e: Throwable => throw e
+    }
   }
   
   /**
