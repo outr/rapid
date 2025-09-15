@@ -1,23 +1,13 @@
 package rapid
 
-import java.util.concurrent.{ExecutionException, TimeoutException, TimeUnit}
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Try
 
 /**
  * Abstract base trait for Fiber implementations that provides common functionality
  * for exception handling, timeout management, and cancellation patterns.
  */
 abstract class AbstractFiber[Return] extends Fiber[Return] with Blockable[Return] {
-  
-  /**
-   * Unwraps ExecutionException to get the underlying cause.
-   * This is a common pattern across all Fiber implementations.
-   */
-  protected def unwrapExecutionException(e: Throwable): Throwable = e match {
-    case ee: ExecutionException if ee.getCause != null => ee.getCause
-    case other => other
-  }
   
   /**
    * Common implementation for await with timeout.
@@ -27,9 +17,7 @@ abstract class AbstractFiber[Return] extends Fiber[Return] with Blockable[Return
     try {
       doAwait(duration.toMillis, TimeUnit.MILLISECONDS)
     } catch {
-      case _: TimeoutException => None
-      case e: ExecutionException => throw unwrapExecutionException(e)
-      case e: Throwable => throw e
+      case e: Throwable => throw ExceptionUtils.unwrapExecutionException(e)
     }
   }
   
@@ -44,12 +32,7 @@ abstract class AbstractFiber[Return] extends Fiber[Return] with Blockable[Return
    * Subclasses should implement doSync for their specific synchronization logic.
    */
   override def sync(): Return = {
-    try {
-      doSync()
-    } catch {
-      case e: ExecutionException => throw unwrapExecutionException(e)
-      case e: Throwable => throw e
-    }
+    ExceptionUtils.handleFutureException(doSync())
   }
   
   /**

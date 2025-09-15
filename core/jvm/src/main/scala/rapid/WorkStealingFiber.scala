@@ -14,7 +14,7 @@ import scala.util.{Try, Success, Failure}
  * 
  * @param task The task to execute
  */
-class WorkStealingFiber[Return](val task: Task[Return]) extends Fiber[Return] with Blockable[Return] {
+class WorkStealingFiber[Return](val task: Task[Return]) extends AbstractFiber[Return] {
   
   // Unique fiber ID
   override val id: Long = FiberIdGenerator.nextId()
@@ -28,42 +28,34 @@ class WorkStealingFiber[Return](val task: Task[Return]) extends Fiber[Return] wi
    * If called from a worker thread, this will execute directly to avoid
    * recursion. Otherwise, it blocks traditionally.
    */
-  override def sync(): Return = {
+  override protected def doSync(): Return = {
     if (WorkStealingPool.isWorkerThread) {
       // We're already in a worker thread - execute directly to avoid recursion
       // This prevents deadlock when tasks call sync() on other tasks
       task.sync()
     } else {
       // External thread - must block traditionally
-      try {
-        future.get()
-      } catch {
-        case e: java.util.concurrent.ExecutionException =>
-          throw e.getCause
-        case e: Throwable =>
-          throw e
-      }
+      future.get()
     }
   }
   
   /**
    * Cancel this fiber.
    */
-  override def cancel: Task[Boolean] = Task {
+  override protected def performCancellation(): Unit = {
     future.cancel(true)
+    ()
   }
   
   /**
    * Wait for the task to complete with a timeout.
    */
-  override def await(duration: FiniteDuration): Option[Return] = {
+  override protected def doAwait(timeout: Long, unit: TimeUnit): Option[Return] = {
     try {
-      val result = future.get(duration.toMillis, TimeUnit.MILLISECONDS)
+      val result = future.get(timeout, unit)
       Some(result)
     } catch {
       case _: java.util.concurrent.TimeoutException => None
-      case e: java.util.concurrent.ExecutionException => throw e.getCause
-      case e: Throwable => throw e
     }
   }
   

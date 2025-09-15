@@ -8,40 +8,27 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.{Try, Success, Failure}
 import rapid.task.{CompletableTask, SleepTask, FlatMapTask, DirectFlatMapTask, PureTask, UnitTask, ErrorTask}
 
-class FixedThreadPoolFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
-  @volatile private var cancelled = false
+class FixedThreadPoolFiber[Return](val task: Task[Return]) extends AbstractFiber[Return] {
   
   // Assign unique ID on creation using thread-local generator
   override val id: Long = FiberIdGenerator.nextId()
 
   private val future = FixedThreadPoolFiber.create(task)
 
-  override def sync(): Return = try {
-    future.get()
-  } catch {
-    case e: java.util.concurrent.ExecutionException => 
-      throw e.getCause
-    case e: Throwable => 
-      throw e
+  override protected def doSync(): Return = future.get()
+
+  override protected def performCancellation(): Unit = {
+    future.cancel(true)
+    ()
   }
 
-  override def cancel: Task[Boolean] = Task {
-    if (!cancelled) {
-      cancelled = true
-      future.cancel(true)
-      true
-    } else {
-      false
+  override protected def doAwait(timeout: Long, unit: TimeUnit): Option[Return] = {
+    try {
+      val result = future.get(timeout, unit)
+      Some(result)
+    } catch {
+      case _: java.util.concurrent.TimeoutException => None
     }
-  }
-
-  override def await(duration: FiniteDuration): Option[Return] = try {
-    val result = future.get(duration.toMillis, TimeUnit.MILLISECONDS)
-    Some(result)
-  } catch {
-    case _: java.util.concurrent.TimeoutException => None
-    case e: java.util.concurrent.ExecutionException => throw e.getCause
-    case e: Throwable => throw e
   }
   
   override def toString: String = s"FixedThreadPoolFiber(id=$id)"

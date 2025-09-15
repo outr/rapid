@@ -1,13 +1,11 @@
 package rapid
 
-import java.util.concurrent.CancellationException
+import java.util.concurrent.{CancellationException, TimeUnit}
 import java.util.concurrent.atomic.AtomicLong
-import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
-class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
+class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[Return] {
   @volatile private var result: Try[Return] = _
-  @volatile private var cancelled = false
   
   override val id: Long = VirtualThreadFiber.counter.incrementAndGet()
 
@@ -25,7 +23,7 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
       }
     })
 
-  override def sync(): Return = {
+  override protected def doSync(): Return = {
     thread.join()
     if (result == null && cancelled) {
       result = Failure(new CancellationException())
@@ -33,24 +31,21 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Retur
     result.get
   }
 
-  override def cancel: Task[Boolean] = Task {
-    if (!cancelled) {
-      cancelled = true
-      thread.interrupt()
-      true
-    } else {
-      false
-    }
+  override protected def performCancellation(): Unit = {
+    thread.interrupt()
   }
 
-  override def await(duration: FiniteDuration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
-    Option(result) match {
-      case Some(Success(value)) => Some(value)
-      case Some(Failure(exception)) => throw exception
-      case None => None
+  override protected def doAwait(timeout: Long, unit: TimeUnit): Option[Return] = {
+    val duration = java.time.Duration.ofMillis(unit.toMillis(timeout))
+    if (thread.join(duration)) {
+      Option(result) match {
+        case Some(Success(value)) => Some(value)
+        case Some(Failure(exception)) => throw exception
+        case None => None
+      }
+    } else {
+      None
     }
-  } else {
-    None
   }
 }
 
