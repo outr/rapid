@@ -16,8 +16,9 @@ class CompletableTask[Return] extends Task[Return] {
   def result: Option[Try[Return]] = {
     if (future.isDone) {
       try {
-        Some(Success(future.getNow(null.asInstanceOf[Return])))
+        Some(Success(future.get()))
       } catch {
+        case ex: java.util.concurrent.ExecutionException => Some(Failure(ex.getCause))
         case ex: Throwable => Some(Failure(ex))
       }
     } else {

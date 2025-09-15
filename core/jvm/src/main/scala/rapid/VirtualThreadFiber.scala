@@ -1,7 +1,6 @@
 package rapid
 
 import java.util.concurrent.{CancellationException, TimeUnit}
-import java.util.concurrent.atomic.AtomicLong
 import scala.util.{Failure, Success, Try}
 
 class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[Return] {

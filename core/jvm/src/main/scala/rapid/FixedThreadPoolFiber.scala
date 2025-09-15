@@ -81,7 +81,7 @@ object FixedThreadPoolFiber {
         // Submit to executor for proper async execution
         val javaFuture = new CompletableFuture[Return]()
         executor.submit(new Runnable {
-          def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+          def run(): Unit = executeCallback(continuation, javaFuture.complete, error => javaFuture.completeExceptionally(error))
         })
         javaFuture
     }
@@ -111,7 +111,7 @@ object FixedThreadPoolFiber {
         // This prevents stack overflow in deep flatMap chains
         val javaFuture = new CompletableFuture[Return]()
         executor.submit(new Runnable {
-          def run(): Unit = executeCallback(task, javaFuture.complete, javaFuture.completeExceptionally)
+          def run(): Unit = executeCallback(task, javaFuture.complete, error => javaFuture.completeExceptionally(error))
         })
         javaFuture
     }

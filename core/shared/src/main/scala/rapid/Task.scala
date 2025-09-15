@@ -113,10 +113,21 @@ trait Task[+Return] extends Any {
                     case _ =>
                       // Complex task, can't optimize further
                       current = nextTask
-                      var j = i - 1
-                      while (j >= 0) {
-                        current = DirectFlatMapTask(current.asInstanceOf[Task[Any]], functions.get(j))
-                        j -= 1
+                      // Compose all remaining functions into one to avoid allocations
+                      if (i > 0) {
+                        var composed: Any => Task[Any] = functions.get(i - 1)
+                        var j = i - 2
+                        while (j >= 0) {
+                          val f = functions.get(j)
+                          val prevComposed = composed
+                          composed = (x: Any) => f(x) match {
+                            case PureTask(v) => prevComposed(v)
+                            case SingleTask(g) => prevComposed(g())
+                            case t => DirectFlatMapTask(t, prevComposed)
+                          }
+                          j -= 1
+                        }
+                        current = DirectFlatMapTask(current.asInstanceOf[Task[Any]], composed)
                       }
                       i = -1 // Exit outer loop
                       null
@@ -164,6 +175,7 @@ trait Task[+Return] extends Any {
             case _: UnitTask => previous = ()
             case SleepTask(d) => 
               val millis = d.toMillis
+              // SYNC-ONLY: Thread.sleep for sync benchmarks. Async goes through scheduler in SharedExecutionEngine
               if (millis > 0L) Thread.sleep(millis)
               previous = ()
             case t: Taskable[_] => 
@@ -179,6 +191,7 @@ trait Task[+Return] extends Any {
               current = forge.asInstanceOf[Forge[Any, Any]](value)
             case FlatMapTask(SleepTask(d), forge) =>
               val millis = d.toMillis
+              // SYNC-ONLY: Thread.sleep for sync benchmarks. Async goes through scheduler in SharedExecutionEngine
               if (millis > 0L) Thread.sleep(millis)
               current = forge.asInstanceOf[Forge[Any, Any]](())
             case FlatMapTask(source, forge) =>
@@ -221,11 +234,12 @@ trait Task[+Return] extends Any {
    * Starts the task and returns a `Fiber` representing the running task.
    */
   def start: Task[Fiber[Return]] = {
-    // Create fiber immediately (which starts async execution)
-    val f = Platform.createFiber(this)
-    if (Task.monitor != null) Task.monitor.fiberCreated(f, this)
-    // Return pure task containing the already-running fiber
-    Task.pure(f)
+    // LAZY: Defer fiber creation until the task is executed (restores lazy evaluation)
+    Task { 
+      val f = Platform.createFiber(this)
+      if (Task.monitor != null) Task.monitor.fiberCreated(f, this)
+      f
+    }
   }
 
   /**

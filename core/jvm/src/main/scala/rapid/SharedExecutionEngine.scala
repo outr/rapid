@@ -32,6 +32,7 @@ object SharedExecutionEngine {
                 case Success(sourceValue) =>
                   try {
                     // Execute forge directly in callback thread for speed
+                    // Type cast safe: FlatMapTask[_, Return] ensures forge produces Return
                     val continuation = flatMap.forge.asInstanceOf[rapid.Forge[Any, Return]](sourceValue)
                     // Inline common cases to avoid recursive executeCallback overhead
                     continuation match {
@@ -51,6 +52,7 @@ object SharedExecutionEngine {
               flatMap.source.asInstanceOf[Task[Any]], 
               (sourceResult: Any) => {
                 try {
+                  // Type cast safe: FlatMapTask[_, Return] ensures forge produces Return
                   val continuation = flatMap.forge.asInstanceOf[rapid.Forge[Any, Return]](sourceResult)
                   executeCallback(continuation, onSuccess, onFailure, executeOnVirtualThread)
                 } catch {
