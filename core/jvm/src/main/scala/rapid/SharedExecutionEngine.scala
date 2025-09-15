@@ -60,7 +60,7 @@ object SharedExecutionEngine {
           case _ =>
             executeCallback(
               flatMap.source.asInstanceOf[Task[Any]], 
-              sourceResult => {
+              (sourceResult: Any) => {
                 try {
                   val continuation = flatMap.forge.asInstanceOf[rapid.Forge[Any, Return]](sourceResult)
                   executeCallback(continuation, onSuccess, onFailure, executeOnVirtualThread)

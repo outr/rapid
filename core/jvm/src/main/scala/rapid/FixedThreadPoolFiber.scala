@@ -271,7 +271,7 @@ object FixedThreadPoolFiber {
 
   def fireAndForget[Return](task: Task[Return]): Unit = {
     // ORIGINAL PATH ONLY - no fast paths for debugging
-    executeCallback(task, _ => (), _ => ())
+    executeCallback(task, (_: Return) => (), (_: Throwable) => ())
   }
   
   

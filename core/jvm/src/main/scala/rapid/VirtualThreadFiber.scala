@@ -18,7 +18,7 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[R
         // Use the shared optimized execution engine
         SharedExecutionEngine.executeCallback(
           task,
-          value => result = Success(value),
+          (value: Return) => result = Success(value),
           error => result = Failure(error),
           None  // VirtualThread doesn't need an executor - it IS the thread
         )
@@ -62,7 +62,7 @@ object VirtualThreadFiber {
       .name(s"rapid-vt-${FiberIdGenerator.nextId()}")
       .start(() => {
         // Use the shared optimized execution engine
-        SharedExecutionEngine.executeCallback(task, _ => (), _ => (), None)
+        SharedExecutionEngine.executeCallback(task, (_: Any) => (), (_: Throwable) => (), None)
       })
   }
 }
