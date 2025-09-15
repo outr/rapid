@@ -21,17 +21,6 @@ object SharedExecutionEngine {
     executeOnVirtualThread: Option[(() => Unit) => Unit] = None
   ): Unit = {
     
-    // Fast path for synchronous tasks
-    task match {
-      case rapid.task.PureTask(value) =>
-        onSuccess(value)
-        return
-      case _: rapid.task.UnitTask =>
-        onSuccess(().asInstanceOf[Return])
-        return
-      case _ => // Continue with other patterns
-    }
-    
     task match {
       // MOST COMMON: FlatMapTask - Optimized for map/flatMap patterns
       case flatMap: rapid.task.FlatMapTask[_, _] =>
@@ -91,6 +80,23 @@ object SharedExecutionEngine {
       // Error handling - Like Netty exception propagation
       case rapid.task.ErrorTask(throwable) =>
         onFailure(throwable)
+      
+      // PureTask and UnitTask - ensure async boundary when executor available
+      case rapid.task.PureTask(value) =>
+        executeOnVirtualThread match {
+          case Some(executor) =>
+            executor(() => onSuccess(value))
+          case None =>
+            onSuccess(value)
+        }
+      
+      case _: rapid.task.UnitTask =>
+        executeOnVirtualThread match {
+          case Some(executor) =>
+            executor(() => onSuccess(().asInstanceOf[Return]))
+          case None =>
+            onSuccess(().asInstanceOf[Return])
+        }
       
       // Complex tasks - Fall back to trampoline or direct execution
       case _ =>
