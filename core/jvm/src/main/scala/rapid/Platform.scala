@@ -13,27 +13,19 @@ object Platform extends RapidPlatform {
   
   /**
    * Check if cooperative yielding is supported.
-   * Returns true if we're in a work-stealing worker thread.
    */
-  override def supportsCooperativeYielding: Boolean = {
-    WorkStealingContext.isInWorkerThread
-  }
+  override def supportsCooperativeYielding: Boolean = false
   
   /**
-   * Perform a cooperative sync operation on a CompletableFuture.
-   * If in a worker thread, yields cooperatively. Otherwise blocks.
+   * Perform a sync operation on a CompletableFuture.
    */
   override def cooperativeSync[T](future: CompletableFuture[T]): T = {
-    if (WorkStealingContext.isInWorkerThread) {
-      CooperativeYielding.cooperativeFuture(future)
-    } else {
-      // Default blocking behavior
-      try {
-        future.get()
-      } catch {
-        case ex: java.util.concurrent.ExecutionException =>
-          throw ex.getCause
-      }
+    // Default blocking behavior
+    try {
+      future.get()
+    } catch {
+      case ex: java.util.concurrent.ExecutionException =>
+        throw ex.getCause
     }
   }
   
@@ -41,12 +33,7 @@ object Platform extends RapidPlatform {
 
 
   override def createFiber[Return](task: Task[Return]): Fiber[Return] = {
-    // Check if work-stealing is enabled via system property
-    if (sys.props.getOrElse("rapid.work-stealing", "false").toBoolean) {
-      new WorkStealingFiber[Return](task)
-    } else {
-      new FixedThreadPoolFiber[Return](task)
-    }
+    new FixedThreadPoolFiber[Return](task)
   }
 
   override def fireAndForget(task: Task[_]): Unit = {

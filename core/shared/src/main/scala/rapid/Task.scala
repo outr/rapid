@@ -643,7 +643,7 @@ trait Task[+Return] extends Any {
     // Use a lightweight async execution to complete the promise
     ec.execute(() => {
       try {
-        // The fiber's sync() will use work-stealing if available
+        // Execute the fiber synchronously
         promise.success(fiber.sync())
       } catch {
         case e: Throwable => promise.failure(e)

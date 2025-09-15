@@ -64,7 +64,7 @@ class CompletableTask[Return] extends Task[Return] {
   }
 
   override def sync(): Return = {
-    // Use cooperative yielding if available (when in work-stealing thread)
+    // Use cooperative yielding if available
     if (rapid.Platform.supportsCooperativeYielding) {
       rapid.Platform.cooperativeSync(future)
     } else {

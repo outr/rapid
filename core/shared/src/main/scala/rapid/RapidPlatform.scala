@@ -19,7 +19,6 @@ trait RapidPlatform {
   
   /**
    * Check if cooperative yielding is supported on this platform.
-   * Returns true if we're in a work-stealing worker thread.
    */
   def supportsCooperativeYielding: Boolean = false
   
