@@ -29,6 +29,7 @@ trait Task[+Return] extends Any {
     var current: Any = this
     var previous: Any = ()
     var batchIndex: Int = 0  // Batching counter for async fairness
+    val BatchSize = 512      // Same as cats-effect for fairness
     
     // Cache monitor reference to avoid volatile read overhead in tight loops
     val monitor = Task.monitor
@@ -122,13 +123,20 @@ trait Task[+Return] extends Any {
                 if (result != null) previous = result
               }
             } else if (source.isInstanceOf[PureTask[_]]) {
-              // DirectFlatMap with PureTask - execute immediately
-              val value = source.asInstanceOf[PureTask[Any]].value
-              current = func(value)
+              // DirectFlatMap with PureTask - batching for fairness and stack safety
+              if (batchIndex < BatchSize) {
+                batchIndex += 1
+                val value = source.asInstanceOf[PureTask[Any]].value
+                current = func(value)
+              } else {
+                // Reset batch and yield thread briefly for fairness
+                batchIndex = 0
+                Thread.`yield`()  // Allow other threads to run
+                val value = source.asInstanceOf[PureTask[Any]].value
+                current = func(value)
+              }
             } else if (source.isInstanceOf[SingleTask[_]]) {
               // DirectFlatMap with SingleTask - batching for fairness and stack safety
-              val BatchSize = 512  // Same as cats-effect for fairness
-              
               if (batchIndex < BatchSize) {
                 batchIndex += 1
                 try {
