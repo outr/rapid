@@ -1,10 +1,7 @@
 package rapid
 
-import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
-import java.util.concurrent.{Executors, Future, ScheduledExecutorService, ThreadFactory, TimeUnit, CompletableFuture, ThreadPoolExecutor, SynchronousQueue}
-import com.sun.management.OperatingSystemMXBean
-import java.lang.management.ManagementFactory
-import scala.concurrent.duration.FiniteDuration
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.{Executors, Future, ScheduledExecutorService, ThreadFactory, TimeUnit, CompletableFuture}
 import scala.util.{Try, Success, Failure}
 import rapid.task.{CompletableTask, SleepTask, FlatMapTask, DirectFlatMapTask, PureTask, UnitTask, ErrorTask}
 
@@ -88,33 +85,6 @@ object FixedThreadPoolFiber {
   private val counter = new AtomicLong(0L)
   
   
-  // Check if a continuation is trivial enough to execute directly
-  // Trivial = simple operations like incrementAndGet, no blocking, no heavy compute
-  private def isTrivialContinuation(task: Task[_]): Boolean = {
-    import rapid.task._
-    import rapid.Forge.FunctionForge
-    task match {
-      case flatMap: FlatMapTask[_, _] =>
-        // Check the forge function - if it's a simple map operation, it's trivial
-        flatMap.forge match {
-          case _: FunctionForge[_, _] =>
-            // Most FunctionForge operations are simple transformations
-            // ManySleepsBenchmark uses .map(_ => counter.incrementAndGet())
-            // This is exactly the kind of trivial operation we want to inline
-            true
-          case _ =>
-            // Complex forge operations should use thread pool
-            false
-        }
-      case _: PureTask[_] =>
-        // Pure values are trivial
-        true
-      case _ =>
-        // Unknown task types - be conservative
-        false
-    }
-  }
-
   private def create[Return](task: Task[Return]): Future[Return] = {
     // Fast path for synchronous tasks that can be executed inline
     task match {
