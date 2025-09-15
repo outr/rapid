@@ -290,12 +290,23 @@ object FixedThreadPoolFiber extends PredictableExecution {
       // UNWRAPPING: DirectFlatMapTask optimizations
       case direct: DirectFlatMapTask[_, _] =>
         direct.source match {
-          // DirectFlatMapTask(PureTask) - common pattern
+          // DirectFlatMapTask(PureTask) - common pattern  
           case pure: PureTask[_] =>
             try {
               val continuation = direct.asInstanceOf[DirectFlatMapTask[Any, Return]].f(pure.value)
-              // Direct recursion - no intermediate future
-              createWithDepth(continuation, depth + 1)
+              // Keep fast construction but ensure async execution
+              continuation match {
+                case PureTask(result) =>
+                  // Fast path for pure values - but still async
+                  CompletableFuture.completedFuture(result)
+                case _ =>
+                  // Submit to executor for proper async execution
+                  val javaFuture = new CompletableFuture[Return]()
+                  executor.submit(new Runnable {
+                    def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+                  })
+                  javaFuture
+              }
             } catch {
               case error: Throwable =>
                 val javaFuture = new CompletableFuture[Return]()
@@ -307,8 +318,19 @@ object FixedThreadPoolFiber extends PredictableExecution {
           case _: UnitTask =>
             try {
               val continuation = direct.asInstanceOf[DirectFlatMapTask[Any, Return]].f(())
-              // Direct recursion - no intermediate future
-              createWithDepth(continuation, depth + 1)
+              // Keep fast construction but ensure async execution
+              continuation match {
+                case PureTask(result) =>
+                  // Fast path for pure values - but still async
+                  CompletableFuture.completedFuture(result)
+                case _ =>
+                  // Submit to executor for proper async execution
+                  val javaFuture = new CompletableFuture[Return]()
+                  executor.submit(new Runnable {
+                    def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+                  })
+                  javaFuture
+              }
             } catch {
               case error: Throwable =>
                 val javaFuture = new CompletableFuture[Return]()
@@ -322,14 +344,10 @@ object FixedThreadPoolFiber extends PredictableExecution {
             TimerWheel.schedule(duration, () => {
               try {
                 val continuation = direct.asInstanceOf[DirectFlatMapTask[Any, Return]].f(())
-                continuation match {
-                  case PureTask(value) =>
-                    javaFuture.complete(value)
-                  case _: UnitTask =>
-                    javaFuture.complete(().asInstanceOf[Return])
-                  case _ =>
-                    executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
-                }
+                // Always submit back to executor for proper async execution
+                executor.submit(new Runnable {
+                  def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+                })
               } catch {
                 case error: Throwable => javaFuture.completeExceptionally(error)
               }
