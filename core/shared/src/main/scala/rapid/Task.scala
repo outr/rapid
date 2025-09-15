@@ -1,7 +1,7 @@
 package rapid
 
 import rapid.monitor.TaskMonitor
-import rapid.task.{CommonTasks, CompletableTask, DirectFlatMapTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
+import rapid.task.{CompletableTask, DirectFlatMapTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.tailrec
@@ -279,17 +279,7 @@ trait Task[+Return] extends Any {
    * @return a new task with the transformed result
    */
   def map[T](f: Return => T): Task[T] = this match {
-    case PureTask(value) => 
-      val result = f(value)
-      // Use cached PureTask for common values
-      result match {
-        case i: Int if i >= -128 && i <= 127 => 
-          CommonTasks.pureInt(i).asInstanceOf[Task[T]]
-        case b: Boolean => 
-          CommonTasks.pureBoolean(b).asInstanceOf[Task[T]]
-        case _ => 
-          PureTask(result)
-      }
+    case PureTask(value) => PureTask(f(value))
     case SingleTask(g) => SingleTask(() => f(g())) // Apply transformation inline
     case ErrorTask(throwable) => ErrorTask(throwable) // Error propagates unchanged
     case SleepTask(d) => 
@@ -657,22 +647,10 @@ object Task extends task.UnitTask {
     t
   }
   
-  /**
-   * Optimized Task.pure that uses cached instances for common values
-   */
-  override def pure[T](value: T): Task[T] = value match {
-    case i: Int if i >= -128 && i <= 127 => 
-      CommonTasks.pureInt(i).asInstanceOf[Task[T]]
-    case b: Boolean => 
-      CommonTasks.pureBoolean(b).asInstanceOf[Task[T]]
-    case null => 
-      CommonTasks.pureNull.asInstanceOf[Task[T]]
-    case "" => 
-      CommonTasks.pureEmptyString.asInstanceOf[Task[T]]
-    case _ => 
-      val t = PureTask(value)
-      if (monitor != null) monitor.created(t)
-      t
+  override def pure[T](value: T): Task[T] = {
+    val t = PureTask(value)
+    if (monitor != null) monitor.created(t)
+    t
   }
 
   def completable[Return]: CompletableTask[Return] = {
