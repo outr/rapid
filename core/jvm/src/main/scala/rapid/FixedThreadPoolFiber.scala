@@ -97,9 +97,9 @@ object FixedThreadPoolFiber {
       case SleepTask(d) =>
         // Sleep can be handled directly with TimerWheel
         val javaFuture = new CompletableFuture[Return]()
-        TimerWheel.schedule(d, () => {
-          javaFuture.complete(().asInstanceOf[Return])
-        })
+        scheduledExecutor.schedule(new Runnable {
+          def run(): Unit = javaFuture.complete(().asInstanceOf[Return])
+        }, d.toMillis, TimeUnit.MILLISECONDS)
         javaFuture
       case _ =>
         createWithDepth(task, 0)
@@ -131,21 +131,23 @@ object FixedThreadPoolFiber {
             // Direct sleep handling - bypass complex callback chains
             val javaFuture = new CompletableFuture[Return]()
             
-            TimerWheel.schedule(duration, () => {
-              try {
-                // Apply the map function directly when timer fires
-                val continuation = flatMap.asInstanceOf[FlatMapTask[Any, Return]].forge.asInstanceOf[rapid.Forge[Any, Return]](())
-                continuation match {
-                  case PureTask(value) =>
-                    javaFuture.complete(value)
-                  case _ =>
-                    // For complex continuations, fall back to callback system
-                    executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+            scheduledExecutor.schedule(new Runnable {
+              def run(): Unit = {
+                try {
+                  // Apply the map function directly when timer fires
+                  val continuation = flatMap.asInstanceOf[FlatMapTask[Any, Return]].forge.asInstanceOf[rapid.Forge[Any, Return]](())
+                  continuation match {
+                    case PureTask(value) =>
+                      javaFuture.complete(value)
+                    case _ =>
+                      // For complex continuations, fall back to callback system
+                      executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+                  }
+                } catch {
+                  case error: Throwable => javaFuture.completeExceptionally(error)
                 }
-              } catch {
-                case error: Throwable => javaFuture.completeExceptionally(error)
               }
-            })
+            }, duration.toMillis, TimeUnit.MILLISECONDS)
             
             javaFuture
             
@@ -210,17 +212,19 @@ object FixedThreadPoolFiber {
           // DirectFlatMapTask(SleepTask) - optimize sleep chains
           case SleepTask(duration) =>
             val javaFuture = new CompletableFuture[Return]()
-            TimerWheel.schedule(duration, () => {
-              try {
-                val continuation = direct.asInstanceOf[DirectFlatMapTask[Any, Return]].f(())
-                // Always submit back to executor for proper async execution
-                executor.submit(new Runnable {
-                  def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
-                })
-              } catch {
-                case error: Throwable => javaFuture.completeExceptionally(error)
+            scheduledExecutor.schedule(new Runnable {
+              def run(): Unit = {
+                try {
+                  val continuation = direct.asInstanceOf[DirectFlatMapTask[Any, Return]].f(())
+                  // Always submit back to executor for proper async execution
+                  executor.submit(new Runnable {
+                    def run(): Unit = executeCallback(continuation, javaFuture.complete, javaFuture.completeExceptionally)
+                  })
+                } catch {
+                  case error: Throwable => javaFuture.completeExceptionally(error)
+                }
               }
-            })
+            }, duration.toMillis, TimeUnit.MILLISECONDS)
             javaFuture
             
           // Other sources - use callback system

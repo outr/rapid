@@ -1,5 +1,6 @@
 package rapid
 
+import java.util.concurrent.TimeUnit
 import scala.util.{Success, Failure}
 
 /**
@@ -83,9 +84,9 @@ object SharedExecutionEngine {
       
       // SleepTask - Use TimerWheel callback directly (avoiding sync() blocking)
       case rapid.task.SleepTask(duration) =>
-        TimerWheel.schedule(duration, () => {
-          onSuccess(().asInstanceOf[Return])
-        })
+        FixedThreadPoolFiber.scheduledExecutor.schedule(new Runnable {
+          def run(): Unit = onSuccess(().asInstanceOf[Return])
+        }, duration.toMillis, TimeUnit.MILLISECONDS)
       
       // Error handling - Like Netty exception propagation
       case rapid.task.ErrorTask(throwable) =>

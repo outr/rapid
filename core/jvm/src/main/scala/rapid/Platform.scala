@@ -50,9 +50,9 @@ object Platform extends RapidPlatform {
     } else {
       // Use THE single timer solution for all of Rapid
       val completable = Task.completable[Unit]
-      TimerWheel.schedule(duration, () => {
-        completable.success(())
-      })
+      FixedThreadPoolFiber.scheduledExecutor.schedule(new Runnable {
+        def run(): Unit = completable.success(())
+      }, duration.toMillis, TimeUnit.MILLISECONDS)
       completable
     }
   }
