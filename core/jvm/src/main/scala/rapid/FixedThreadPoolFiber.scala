@@ -118,8 +118,23 @@ object FixedThreadPoolFiber {
   }
 
   def fireAndForget[Return](task: Task[Return]): Unit = {
-    // ORIGINAL PATH ONLY - no fast paths for debugging
-    executeCallback(task, (_: Return) => (), (_: Throwable) => ())
+    // Sub-Task 2: Simple optimization - direct submission with reduced overhead
+    executor.execute(new Runnable {
+      def run(): Unit = {
+        try {
+          SharedExecutionEngine.executeCallback(
+            task,
+            _ => (), // onSuccess - fire and forget
+            _ => (), // onFailure - fire and forget  
+            Some((runnable: () => Unit) => executor.execute(new Runnable {
+              override def run(): Unit = runnable()
+            }))
+          )
+        } catch {
+          case _: Throwable => // Swallow exceptions in fire-and-forget
+        }
+      }
+    })
   }
   
   
@@ -152,3 +167,4 @@ object FixedThreadPoolFiber {
   // Accessor for JDKScheduledSleep to use the scheduled executor service
   def scheduledExecutorService: ScheduledExecutorService = scheduledExecutor
 }
+
