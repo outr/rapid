@@ -254,8 +254,8 @@ object FixedThreadPoolFiber {
                     // Complex tasks still need proper execution
                     SharedExecutionEngine.executeCallback(
                       task.asInstanceOf[Task[Any]],
-                      _ => (), // onSuccess - fire and forget
-                      _ => (), // onFailure - fire and forget  
+                      (_: Any) => (), // onSuccess - fire and forget
+                      (_: Throwable) => (), // onFailure - fire and forget  
                       None // No async executor needed for inline execution
                     )
                 }
