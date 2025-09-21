@@ -10,27 +10,6 @@ object Platform extends RapidPlatform {
   override def executionContext: ExecutionContext = scala.concurrent.ExecutionContext.Implicits.global
 
   override def supportsCancel: Boolean = true
-  
-  /**
-   * Check if cooperative yielding is supported.
-   */
-  override def supportsCooperativeYielding: Boolean = false
-  
-  /**
-   * Perform a sync operation on a CompletableFuture.
-   */
-  override def cooperativeSync[T](future: CompletableFuture[T]): T = {
-    // Default blocking behavior
-    try {
-      future.get()
-    } catch {
-      case ex: java.util.concurrent.ExecutionException =>
-        throw ex.getCause
-    }
-  }
-  
-
-
 
   override def createFiber[Return](task: Task[Return]): Fiber[Return] = {
     new FixedThreadPoolFiber[Return](task)
