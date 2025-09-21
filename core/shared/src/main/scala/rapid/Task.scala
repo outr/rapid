@@ -115,18 +115,23 @@ trait Task[+Return] extends Any {
                       current = nextTask
                       // Compose all remaining functions into one to avoid allocations
                       if (i > 0) {
+                        // Pure function composition - no Task allocations during composition
                         var composed: Any => Task[Any] = functions.get(i - 1)
                         var j = i - 2
                         while (j >= 0) {
                           val f = functions.get(j)
                           val prevComposed = composed
-                          composed = (x: Any) => f(x) match {
-                            case PureTask(v) => prevComposed(v)
-                            case SingleTask(g) => prevComposed(g())
-                            case t => DirectFlatMapTask(t, prevComposed)
+                          composed = (x: Any) => {
+                            val intermediate = f(x)
+                            intermediate match {
+                              case PureTask(v) => prevComposed(v)
+                              case SingleTask(g) => prevComposed(g())
+                              case t => prevComposed(t.sync())
+                            }
                           }
                           j -= 1
                         }
+                        // Single DirectFlatMapTask creation with composed function
                         current = DirectFlatMapTask(current.asInstanceOf[Task[Any]], composed)
                       }
                       i = -1 // Exit outer loop
