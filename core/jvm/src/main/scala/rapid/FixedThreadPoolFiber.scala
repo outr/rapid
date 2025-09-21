@@ -32,8 +32,11 @@ class FixedThreadPoolFiber[Return](val task: Task[Return]) extends AbstractFiber
 }
 
 object FixedThreadPoolFiber {
-  
+
   private val defaultPoolSize = math.max(Runtime.getRuntime.availableProcessors(), 4)
+
+  // Cooperative yielding frequency - yield every N processed tasks to avoid thread monopolization
+  private val YieldFrequency = 10000
   
   private def createThreadFactory(prefix: String): ThreadFactory = new ThreadFactory {
     override def newThread(r: Runnable): Thread = {
@@ -268,7 +271,7 @@ object FixedThreadPoolFiber {
               task = taskQueue.poll()
               
               // Periodically yield to avoid hogging the thread
-              if (processed % 10000 == 0) {
+              if (processed % YieldFrequency == 0) {
                 Thread.`yield`()
               }
             }
