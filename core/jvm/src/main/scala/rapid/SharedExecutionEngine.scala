@@ -36,8 +36,12 @@ object SharedExecutionEngine {
                     val continuation = flatMap.forge.asInstanceOf[rapid.Forge[Any, Return]](sourceValue)
                     // Inline common cases to avoid recursive executeCallback overhead
                     continuation match {
-                      case rapid.task.PureTask(value) => onSuccess(value.asInstanceOf[Return])
-                      case _: rapid.task.UnitTask => onSuccess(().asInstanceOf[Return])
+                      case rapid.task.PureTask(value) =>
+                        // Safe cast: PureTask[Return] ensures value is of type Return
+                        onSuccess(value.asInstanceOf[Return])
+                      case _: rapid.task.UnitTask =>
+                        // Safe cast: UnitTask context ensures Return =:= Unit
+                        onSuccess(().asInstanceOf[Return])
                       case _ => executeCallback(continuation, onSuccess, onFailure, executeOnVirtualThread)
                     }
                   } catch {
@@ -68,7 +72,9 @@ object SharedExecutionEngine {
       case completable: rapid.task.CompletableTask[_] =>
         completable.onComplete { result =>
           result match {
-            case Success(value) => onSuccess(value.asInstanceOf[Return])
+            case Success(value) =>
+              // Safe cast: Task[Return] execution ensures value is of type Return
+              onSuccess(value.asInstanceOf[Return])
             case Failure(throwable) => onFailure(throwable)
           }
         }
@@ -76,7 +82,10 @@ object SharedExecutionEngine {
       // SleepTask - Use TimerWheel callback directly (avoiding sync() blocking)
       case rapid.task.SleepTask(duration) =>
         FixedThreadPoolFiber.scheduledExecutor.schedule(new Runnable {
-          def run(): Unit = onSuccess(().asInstanceOf[Return])
+          def run(): Unit = {
+            // Safe cast: SleepTask returns Unit, cast valid when Return =:= Unit
+            onSuccess(().asInstanceOf[Return])
+          }
         }, duration.toMillis, TimeUnit.MILLISECONDS)
       
       // Error handling - Like Netty exception propagation
@@ -95,8 +104,12 @@ object SharedExecutionEngine {
       case _: rapid.task.UnitTask =>
         executeOnVirtualThread match {
           case Some(executor) =>
-            executor(() => onSuccess(().asInstanceOf[Return]))
+            executor(() => {
+              // Safe cast: UnitTask returns Unit, cast valid when Return =:= Unit
+              onSuccess(().asInstanceOf[Return])
+            })
           case None =>
+            // Safe cast: UnitTask returns Unit, cast valid when Return =:= Unit
             onSuccess(().asInstanceOf[Return])
         }
       
