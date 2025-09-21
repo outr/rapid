@@ -413,8 +413,8 @@ trait Task[+Return] extends Any {
     case ErrorTask(throwable) => ErrorTask(throwable) // Error propagates unchanged
     case sleep: SleepTask =>
       // SleepTask optimization: use DirectFlatMapTask for zero-allocation sleep().flatMap() patterns
-      // Safe cast: SleepTask extends Task[Unit], works when Return =:= Unit
-      DirectFlatMapTask(sleep, f.asInstanceOf[Unit => Task[T]])
+      // Cast the sleep task rather than the function for Scala 2.13 compatibility
+      DirectFlatMapTask(sleep.asInstanceOf[Task[Return]], f)
     case _ => DirectFlatMapTask(this, f) // Zero-allocation path: store raw function directly
   }
 
