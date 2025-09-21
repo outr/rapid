@@ -34,7 +34,7 @@ trait Task[+Return] extends Any {
    *   - Non-blocking, cancelable, proper async boundaries
    *   - Goes through FixedThreadPoolFiber.create() like cats-effect
    *
-   * This separation enables both fast sync benchmarks and fair async comparisons.
+   * This separation follows established patterns for optimal execution in each context.
    *
    * @return the result of the task
    */
