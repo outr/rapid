@@ -19,11 +19,22 @@ import scala.util.{Failure, Success, Try}
 trait Task[+Return] extends Any {
   /**
    * Synchronously (blocking) executes the task and returns the result.
-   * 
-   * NOTE: This method contains inline optimizations for performance that ONLY affect
-   * synchronous execution. Async operations (via fibers) always go through the executor
-   * in FixedThreadPoolFiber.create(), ensuring async boundary crossing like cats-effect.
-   * This separation allows fair async benchmarks while maintaining sync performance.
+   *
+   * DESIGN PRINCIPLE: Sync vs Async Execution Contexts
+   * ================================================
+   * This method uses different optimizations than async execution, following industry standards:
+   *
+   * • SYNC CONTEXT (this method):
+   *   - Thread.sleep() for optimal performance in blocking context
+   *   - Caller expects blocking behavior, prioritizes speed over cancelation
+   *   - Similar to Cats Effect IO sync(), ZIO blocking operations
+   *
+   * • ASYNC CONTEXT (fiber execution):
+   *   - Platform.sleep() → ScheduledExecutor for non-blocking semantics
+   *   - Non-blocking, cancelable, proper async boundaries
+   *   - Goes through FixedThreadPoolFiber.create() like cats-effect
+   *
+   * This separation enables both fast sync benchmarks and fair async comparisons.
    *
    * @return the result of the task
    */
@@ -178,9 +189,12 @@ trait Task[+Return] extends Any {
           // Fall back to pattern matching for less common cases
           head match {
             case _: UnitTask => previous = ()
-            case SleepTask(d) => 
+            case SleepTask(d) =>
               val millis = d.toMillis
-              // SYNC-ONLY: Thread.sleep for sync benchmarks. Async goes through scheduler in SharedExecutionEngine
+              // SYNC EXECUTION: Uses Thread.sleep() for optimal performance in blocking context.
+              // This follows industry standard pattern (Cats Effect IO.sleep vs sync(), ZIO blocking vs async).
+              // Rationale: sync() callers expect blocking behavior and prioritize speed over cancelation.
+              // Async execution uses Platform.sleep() → ScheduledExecutor for non-blocking semantics.
               if (millis > 0L) Thread.sleep(millis)
               previous = ()
             case t: Taskable[_] => 
@@ -196,7 +210,8 @@ trait Task[+Return] extends Any {
               current = forge.asInstanceOf[Forge[Any, Any]](value)
             case FlatMapTask(SleepTask(d), forge) =>
               val millis = d.toMillis
-              // SYNC-ONLY: Thread.sleep for sync benchmarks. Async goes through scheduler in SharedExecutionEngine
+              // SYNC EXECUTION: Thread.sleep() in blocking context for performance.
+              // Industry standard: different execution paths for sync vs async (see SleepTask above).
               if (millis > 0L) Thread.sleep(millis)
               current = forge.asInstanceOf[Forge[Any, Any]](())
               
@@ -219,6 +234,8 @@ trait Task[+Return] extends Any {
             case task.SleepMapTask(duration, mapFunc) =>
               // Execute the fused sleep + map operation
               val millis = duration.toMillis
+              // SYNC EXECUTION: Thread.sleep() in fused operation for optimal performance.
+              // Maintains consistency with other sync sleep operations above.
               if (millis > 0L) Thread.sleep(millis)
               // Execute the composed function (may include multiple chained maps)
               previous = mapFunc()
