@@ -266,6 +266,8 @@ trait Task[+Return] extends Any {
       }
     }
 
+    // Safe cast: execution logic ensures 'previous' contains value of type Return
+    // This is a common pattern in high-performance interpreters to avoid boxing overhead
     previous.asInstanceOf[Return]
   }
 
@@ -405,11 +407,14 @@ trait Task[+Return] extends Any {
    */
   def flatMap[T](f: Return => Task[T]): Task[T] = this match {
     case PureTask(value) => f(value) // Direct execution for pure values
-    case _: UnitTask => f(().asInstanceOf[Return]) // Avoid building extra DirectFlatMapTask for Unit
+    case _: UnitTask =>
+      // Type-safe Unit handling: UnitTask always returns Unit type
+      f(this.sync()) // Safe because UnitTask.sync() returns Unit which matches Return type for UnitTask
     case ErrorTask(throwable) => ErrorTask(throwable) // Error propagates unchanged
-    case sleep: SleepTask => 
-      // Sleep returns Unit, optimize by using DirectFlatMapTask with Unit function
-      DirectFlatMapTask(sleep.asInstanceOf[Task[Return]], f)
+    case sleep: SleepTask =>
+      // SleepTask optimization: use DirectFlatMapTask for zero-allocation sleep().flatMap() patterns
+      // Safe cast: SleepTask extends Task[Unit], works when Return =:= Unit
+      DirectFlatMapTask(sleep, f.asInstanceOf[Unit => Task[T]])
     case _ => DirectFlatMapTask(this, f) // Zero-allocation path: store raw function directly
   }
 
