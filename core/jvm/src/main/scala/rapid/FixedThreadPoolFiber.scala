@@ -241,27 +241,13 @@ object FixedThreadPoolFiber {
             
             while (task != null) {
               try {
-                // Direct inline execution for each task
-                task match {
-                  case st: SingleTask[_] =>
-                    // Most common case in benchmark - execute directly
-                    try { 
-                      st.f() 
-                    } catch { 
-                      case _: Throwable => // Fire-and-forget 
-                    }
-                  case PureTask(_) | _: UnitTask =>
-                    // Already computed, nothing to do
-                    ()
-                  case _ =>
-                    // Complex tasks still need proper execution
-                    SharedExecutionEngine.executeCallback(
-                      task.asInstanceOf[Task[Any]],
-                      (_: Any) => (), // onSuccess - fire and forget
-                      (_: Throwable) => (), // onFailure - fire and forget  
-                      None // No async executor needed for inline execution
-                    )
-                }
+                // Direct inline execution for each task - use shared engine for all
+                SharedExecutionEngine.executeCallback(
+                  task.asInstanceOf[Task[Any]],
+                  (_: Any) => (), // onSuccess - fire and forget
+                  (_: Throwable) => (), // onFailure - fire and forget
+                  None // No async executor needed for inline execution
+                )
               } catch {
                 case _: Throwable => // Swallow exceptions in fire-and-forget
               }
