@@ -79,15 +79,30 @@ object SharedExecutionEngine {
           }
         }
       
-      // SleepTask - Use TimerWheel callback directly (avoiding sync() blocking)
+      // SleepTask - Use TimerWheel for O(1) insertion (avoiding sync() blocking)
       case rapid.task.SleepTask(duration) =>
-        FixedThreadPoolFiber.scheduledExecutor.schedule(new Runnable {
+        TimerWheel.schedule(duration, new Runnable {
           def run(): Unit = {
             // Safe cast: SleepTask returns Unit, cast valid when Return =:= Unit
             onSuccess(().asInstanceOf[Return])
           }
-        }, duration.toMillis, TimeUnit.MILLISECONDS)
-      
+        })
+
+      // SleepMapTask - Fused sleep+map operation (critical for ManySleeps performance)
+      case rapid.task.SleepMapTask(duration, mapFunc) =>
+        TimerWheel.schedule(duration, new Runnable {
+          def run(): Unit = {
+            try {
+              // Execute the composed map function after sleep completes
+              val result = mapFunc()
+              // Safe cast: SleepMapTask[Return] ensures mapFunc produces Return type
+              onSuccess(result.asInstanceOf[Return])
+            } catch {
+              case ex: Throwable => onFailure(ex)
+            }
+          }
+        })
+
       // Error handling - Like Netty exception propagation
       case rapid.task.ErrorTask(throwable) =>
         onFailure(throwable)

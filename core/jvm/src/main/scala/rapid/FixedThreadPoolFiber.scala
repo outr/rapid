@@ -75,43 +75,6 @@ object FixedThreadPoolFiber {
   // Similar to ZIO's FiberRuntime.running flag
   private val isProcessingQueue = new AtomicBoolean(false)
   
-  // Object pool for sleep optimization - focus on Runnable reuse
-  private val runnablePool = new ThreadLocal[ConcurrentLinkedQueue[SleepRunnable]] {
-    override def initialValue(): ConcurrentLinkedQueue[SleepRunnable] = new ConcurrentLinkedQueue()
-  }
-  
-  // Reusable runnable for sleep tasks
-  private class SleepRunnable(var future: CompletableFuture[Any] = null) extends Runnable {
-    def run(): Unit = {
-      if (future != null) {
-        future.complete(())
-        // Return runnable to pool for reuse
-        future = null
-        runnablePool.get().offer(this)
-      }
-    }
-    
-    def reset(f: CompletableFuture[Any]): Unit = {
-      this.future = f
-    }
-  }
-  
-  // Object pool helpers
-  @inline private def getPooledFuture[T](): CompletableFuture[T] = {
-    // Simplified: just create new futures, focus on Runnable reuse
-    new CompletableFuture[T]()
-  }
-  
-  @inline private def getPooledRunnable(future: CompletableFuture[Any]): SleepRunnable = {
-    val pool = runnablePool.get()
-    val pooled = pool.poll()
-    if (pooled != null) {
-      pooled.reset(future)
-      pooled
-    } else {
-      new SleepRunnable(future)
-    }
-  }
   
   private def create[Return](task: Task[Return]): Future[Return] = {
     // CRITICAL: Always ensure at least one async hop to prevent stack overflow
@@ -148,10 +111,10 @@ object FixedThreadPoolFiber {
        * and execute them more efficiently.
        */
       case SleepMapTask(duration, mapFunc) =>
-        // Execute the fused sleep+map operation efficiently
-        // The mapFunc has already composed all chained map operations
+        // Execute the fused sleep+map operation efficiently using TimerWheel
+        // O(1) insertion for high-volume timer operations
         val javaFuture = new CompletableFuture[Return]()
-        scheduledExecutor.schedule(new Runnable {
+        TimerWheel.schedule(duration, new Runnable {
           def run(): Unit = {
             try {
               // Execute the composed function after sleep
@@ -162,15 +125,17 @@ object FixedThreadPoolFiber {
               case e: Throwable => javaFuture.completeExceptionally(e)
             }
           }
-        }, duration.toMillis, TimeUnit.MILLISECONDS)
+        })
         javaFuture
         
       case SleepTask(d) =>
-        // Optimized sleep handling with object pooling
-        val javaFuture = getPooledFuture[Return]()
-        val runnable = getPooledRunnable(javaFuture.asInstanceOf[CompletableFuture[Any]])
-        
-        scheduledExecutor.schedule(runnable, d.toMillis, TimeUnit.MILLISECONDS)
+        // Simple sleep handling with TimerWheel for O(1) insertion
+        val javaFuture = new CompletableFuture[Return]()
+        TimerWheel.schedule(d, new Runnable {
+          def run(): Unit = {
+            javaFuture.complete(().asInstanceOf[Return])
+          }
+        })
         javaFuture
       case _ =>
         // Always go through executor for async hop - even for PureTask/UnitTask
