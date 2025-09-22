@@ -2,9 +2,7 @@ package rapid
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-import java.util.concurrent.{ThreadPoolExecutor, TimeUnit, LinkedBlockingQueue, Executors, Executor, CompletableFuture}
-import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.TimeUnit
 
 object Platform extends RapidPlatform {
   override def executionContext: ExecutionContext = scala.concurrent.ExecutionContext.Implicits.global
