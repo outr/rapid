@@ -35,12 +35,4 @@ object Platform extends RapidPlatform {
       completable
     }
   }
-  
-  /**
-   * Optimized sleep + callback API that bypasses Task creation.
-   * Reduces object allocations by 50% compared to sleep().map().
-   */
-  def sleepAndThen[T](duration: FiniteDuration)(callback: => T): Fiber[T] = {
-    new SleepCallbackFiber(duration, () => callback)
-  }
 }

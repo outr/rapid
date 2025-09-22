@@ -113,27 +113,6 @@ object FixedThreadPoolFiber {
     }
   }
   
-  @inline private def failedFuture[T](error: Throwable): CompletableFuture[T] = {
-    val future = new CompletableFuture[T]()
-    future.completeExceptionally(error)
-    future
-  }
-  
-  @inline private def executeContinuation[Return](continuation: Task[Return]): Future[Return] = {
-    continuation match {
-      case PureTask(result) =>
-        // Fast path for pure values - but still async
-        CompletableFuture.completedFuture(result)
-      case _ =>
-        // Submit to executor for proper async execution
-        val javaFuture = new CompletableFuture[Return]()
-        executor.submit(new Runnable {
-          def run(): Unit = executeCallback(continuation, javaFuture.complete, error => javaFuture.completeExceptionally(error))
-        })
-        javaFuture
-    }
-  }
-  
   private def create[Return](task: Task[Return]): Future[Return] = {
     // CRITICAL: Always ensure at least one async hop to prevent stack overflow
     // This matches cats-effect's approach where IO.async forces a thread shift

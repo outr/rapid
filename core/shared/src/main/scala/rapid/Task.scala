@@ -737,16 +737,4 @@ object Task extends task.UnitTask {
     if (monitor != null) monitor.created(c)
     c
   }
-  
-  /**
-   * Optimized sleep + callback API that bypasses Task creation.
-   * Goes directly to Fiber creation, reducing object allocations by 50%.
-   * 
-   * @param duration the duration to sleep
-   * @param callback the callback to execute after sleeping
-   * @return a Fiber that will complete with the callback result
-   */
-  def sleepAndThen[T](duration: FiniteDuration)(callback: => T): Fiber[T] = {
-    Platform.sleepAndThen(duration)(callback)
-  }
 }
