@@ -1,32 +1,30 @@
 package rapid
 
-import java.util.concurrent.{CancellationException, TimeUnit}
+import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicLong
+import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
-class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[Return] {
+class VirtualThreadFiber[Return](val task: Task[Return]) extends Blockable[Return] with Fiber[Return] {
+  override val id: Long = VirtualThreadFiber.counter.incrementAndGet()
   @volatile private var result: Try[Return] = _
-  
-  // Use thread-local ID generator to eliminate CAS contention (same as FixedThreadPoolFiber)
-  override val id: Long = FiberIdGenerator.nextId()
+  @volatile private var cancelled = false
 
   private val thread = Thread
     .ofVirtual()
-    .name(s"rapid-${id}")
+    .name(s"rapid-$id")
     .start(() => {
       if (!cancelled) {
-        // Use the shared optimized execution engine
-        SharedExecutionEngine.executeCallback(
-          task,
-          (value: Return) => result = Success(value),
-          error => result = Failure(error),
-          None  // VirtualThread doesn't need an executor - it IS the thread
-        )
-      } else {
-        result = Failure(new CancellationException("Task was cancelled"))
+        try {
+          result = Try(task.sync())
+        } catch {
+          case _: InterruptedException if cancelled => result = Failure(new CancellationException("Task was cancelled"))
+          case t: Throwable => result = Failure(t)
+        }
       }
     })
 
-  override protected def doSync(): Return = {
+  override def sync(): Return = {
     thread.join()
     if (result == null && cancelled) {
       result = Failure(new CancellationException())
@@ -34,34 +32,36 @@ class VirtualThreadFiber[Return](val task: Task[Return]) extends AbstractFiber[R
     result.get
   }
 
-  override protected def performCancellation(): Unit = {
-    thread.interrupt()
+  override def cancel: Task[Boolean] = Task {
+    if (!cancelled) {
+      cancelled = true
+      thread.interrupt()
+      true
+    } else {
+      false
+    }
   }
 
-  override protected def doAwait(timeout: Long, unit: TimeUnit): Option[Return] = {
-    val duration = java.time.Duration.ofMillis(unit.toMillis(timeout))
-    if (thread.join(duration)) {
-      Option(result) match {
-        case Some(Success(value)) => Some(value)
-        case Some(Failure(exception)) => throw exception
-        case None => None
-      }
-    } else {
-      None
+  override def await(duration: FiniteDuration): Option[Return] = if (thread.join(java.time.Duration.ofMillis(duration.toMillis))) {
+    Option(result) match {
+      case Some(Success(value)) => Some(value)
+      case Some(Failure(exception)) => throw exception
+      case None => None
     }
+  } else {
+    None
   }
 }
 
 object VirtualThreadFiber {
-  // Removed - now using FiberIdGenerator instead
+  private val counter = new AtomicLong(0L)
 
   def fireAndForget(task: Task[_]): Unit = {
     Thread
       .ofVirtual()
-      .name(s"rapid-vt-${FiberIdGenerator.nextId()}")
+      .name(s"rapid-vt-${counter.incrementAndGet()}")
       .start(() => {
-        // Use the shared optimized execution engine
-        SharedExecutionEngine.executeCallback(task, (_: Any) => (), (_: Throwable) => (), None)
+        task.sync()
       })
   }
 }

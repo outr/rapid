@@ -358,8 +358,9 @@ trait Task[+Return] extends Any {
     case PureTask(value) => PureTask(f(value))
     case SingleTask(g) => SingleTask(() => f(g())) // Apply transformation inline
     case ErrorTask(throwable) => ErrorTask(throwable) // Error propagates unchanged
-    case sleep: SleepTask => 
+    case sleep: SleepTask =>
       // Sleep returns Unit, so we know the type - optimize by chaining
+      // Type-safe cast: SleepTask always returns Unit, so f() takes Unit parameter
       FlatMapTask(sleep.asInstanceOf[Task[Any]], Forge[Any, T](_ => PureTask(f(().asInstanceOf[Return]))))
     case _ => FlatMapTask(this, Forge[Return, T](i => PureTask(f(i))))
   }
@@ -408,8 +409,9 @@ trait Task[+Return] extends Any {
   def flatMap[T](f: Return => Task[T]): Task[T] = this match {
     case PureTask(value) => f(value) // Direct execution for pure values
     case _: UnitTask =>
-      // Type-safe Unit handling: UnitTask always returns Unit type
-      f(this.sync()) // Safe because UnitTask.sync() returns Unit which matches Return type for UnitTask
+      // UnitTask completes immediately with Unit value
+      // Safe to call f directly as UnitTask has no computation
+      f(().asInstanceOf[Return])
     case ErrorTask(throwable) => ErrorTask(throwable) // Error propagates unchanged
     case sleep: SleepTask =>
       // SleepTask optimization: use DirectFlatMapTask for zero-allocation sleep().flatMap() patterns

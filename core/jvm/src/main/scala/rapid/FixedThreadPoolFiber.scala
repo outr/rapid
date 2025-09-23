@@ -193,7 +193,12 @@ object FixedThreadPoolFiber {
                   None // No async executor needed for inline execution
                 )
               } catch {
-                case _: Throwable => // Swallow exceptions in fire-and-forget
+                case ex: Throwable =>
+                  // Log exceptions in fire-and-forget for maintainability
+                  System.err.println(s"[FixedThreadPoolFiber] Exception in fire-and-forget task: $ex")
+                  if (System.getProperty("rapid.debug") != null) {
+                    ex.printStackTrace(System.err)
+                  }
               }
               
               processed += 1

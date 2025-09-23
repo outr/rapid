@@ -18,7 +18,7 @@ class CompletableTask[Return] extends Task[Return] {
       try {
         Some(Success(future.get()))
       } catch {
-        case ex: java.util.concurrent.ExecutionException => Some(Failure(ex.getCause))
+        case ex: java.util.concurrent.ExecutionException => Some(Failure(Option(ex.getCause).getOrElse(ex)))
         case ex: Throwable => Some(Failure(ex))
       }
     } else {
