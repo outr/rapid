@@ -37,9 +37,7 @@ class TimerWheel {
     }
   )
 
-  // Statistics
-  private val totalScheduled = new AtomicInteger(0)
-  private val totalExecuted = new AtomicInteger(0)
+  // Task ID counter for unique IDs (needed for overflow queue ordering)
   private val taskIdCounter = new AtomicInteger(0)
 
   // Control flag
@@ -95,8 +93,6 @@ class TimerWheel {
       callback
     )
 
-    totalScheduled.incrementAndGet()
-
     if (delayMs < wheelSize * tickDurationMs) {
       // Fits in the wheel - calculate slot
       val ticksFromNow = (delayMs / tickDurationMs).toInt
@@ -120,9 +116,13 @@ class TimerWheel {
       if (task.deadlineMs <= nowMs + tickDurationMs) {
         // Task is due - execute it
         executeTask(task)
-      } else {
-        // Task was scheduled for a future rotation - put it back
+      } else if (task.deadlineMs < nowMs + (wheelSize * tickDurationMs)) {
+        // Task is for a future rotation within this wheel cycle - keep it
         bucket.offer(task)
+      } else {
+        // Task is too far in future (shouldn't happen but defensive)
+        // Move to overflow queue to prevent memory leak
+        overflowQueue.add(task)
       }
       task = bucket.poll()
     }
@@ -148,7 +148,6 @@ class TimerWheel {
   }
 
   private def executeTask(task: TimerTask): Unit = {
-    totalExecuted.incrementAndGet()
     try {
       // Execute on the timer thread - callbacks should be fast
       // For heavy work, the callback should submit to an executor
@@ -161,11 +160,14 @@ class TimerWheel {
   def shutdown(): Unit = {
     running.set(false)
     timerThread.interrupt()
+
+    // Clean up any remaining tasks to prevent memory leaks
+    for (bucket <- wheel) {
+      bucket.clear()
+    }
+    overflowQueue.clear()
   }
 
-  def statistics(): String = {
-    s"TimerWheel[scheduled=${totalScheduled.get()}, executed=${totalExecuted.get()}, pending=${totalScheduled.get() - totalExecuted.get()}]"
-  }
 }
 
 /**
@@ -180,6 +182,4 @@ object TimerWheel {
   }
 
   def shutdown(): Unit = instance.shutdown()
-
-  def statistics(): String = instance.statistics()
 }
