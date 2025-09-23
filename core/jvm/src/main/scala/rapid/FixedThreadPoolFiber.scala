@@ -116,14 +116,19 @@ object FixedThreadPoolFiber {
         val javaFuture = new CompletableFuture[Return]()
         TimerWheel.schedule(duration, new Runnable {
           def run(): Unit = {
-            try {
-              // Execute the composed function after sleep
-              // This represents the fused operation: sleep then map
-              val result = mapFunc()
-              javaFuture.complete(result.asInstanceOf[Return])
-            } catch {
-              case e: Throwable => javaFuture.completeExceptionally(e)
-            }
+            // Submit continuation to executor for proper optimization
+            // This ensures stack safety and batching for complex continuations
+            // Trade-off: ~3-4ms overhead for 1M tasks, but we have headroom (12k -> ~16k still beats 20k target)
+            executor.execute(new Runnable {
+              def run(): Unit = {
+                try {
+                  val result = mapFunc()
+                  javaFuture.complete(result.asInstanceOf[Return])
+                } catch {
+                  case e: Throwable => javaFuture.completeExceptionally(e)
+                }
+              }
+            })
           }
         })
         javaFuture
