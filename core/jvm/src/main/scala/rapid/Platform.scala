@@ -20,16 +20,17 @@ object Platform extends RapidPlatform {
 
   override def sleep(duration: FiniteDuration): Task[Unit] = {
     import scala.concurrent.duration._
-    
-    val millis = duration.toMillis
-    if (millis <= 0L) {
+
+    val nanos = duration.toNanos
+    if (nanos <= 0L) {
       Task.unit
     } else {
       // Use THE single timer solution for all of Rapid
+      // Use nanoseconds for better precision to avoid early wake-ups
       val completable = Task.completable[Unit]
       FixedThreadPoolFiber.scheduledExecutor.schedule(new Runnable {
         def run(): Unit = completable.success(())
-      }, duration.toMillis, TimeUnit.MILLISECONDS)
+      }, nanos, TimeUnit.NANOSECONDS)
       completable
     }
   }
