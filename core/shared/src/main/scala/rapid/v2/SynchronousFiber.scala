@@ -5,16 +5,15 @@ import scala.annotation.tailrec
 
 case class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   private val TraceBufSize = 256
-  private val traceBuf = new Array[Trace](TraceBufSize)
+  // Allocate trace buffer only if tracing enabled to reduce allocation churn in hot paths
+  private val tracing = Trace.Enabled
+  private val traceBuf: Array[Trace] = if (tracing) new Array[Trace](TraceBufSize) else null
   private var traceIdx = 0
 
-  @inline private def record(tr: Trace): Unit = if (tr != Trace.empty) {
+  @inline private def record(tr: Trace): Unit = if (tracing && tr != Trace.empty) {
     traceBuf(traceIdx & (TraceBufSize - 1)) = tr
     traceIdx += 1
   }
-
-  // cache once so the JIT can dead-code-eliminate trace paths
-  private val tracing = Trace.Enabled
 
   private var lastTrace: Trace = Trace.empty
   private val stack = new util.ArrayDeque[Any]
@@ -35,22 +34,13 @@ case class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
               case Pure(value) =>
                 previous = value
               case Suspend(f, tr) =>
-                if (tracing) {
-                  lastTrace = tr
-                  record(tr)
-                }
+                if (tracing) { lastTrace = tr; record(tr) }
                 previous = f()
               case Sleep(duration, tr) =>
-                if (tracing) {
-                  lastTrace = tr
-                  record(tr)
-                }
+                if (tracing) { lastTrace = tr; record(tr) }
                 Thread.sleep(duration.toMillis)
               case c@Completable(tr) =>
-                if (tracing) {
-                  lastTrace = tr
-                  record(tr)
-                }
+                if (tracing) { lastTrace = tr; record(tr) }
                 previous = c.sync()
               case FlatMap(input, f, tr) =>
                 // If tracing is OFF, avoid allocating a tuple

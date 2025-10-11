@@ -14,7 +14,6 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 class ManyTasksBenchmark {
   private val tasks = 1_000_000
-  private def simpleComputation: Int = math.round(math.sqrt(163.0)).toInt
 
   // Reuse ZIO runtime; creating it is expensive
   private lazy val zioRuntime = Runtime.default
@@ -24,9 +23,16 @@ class ManyTasksBenchmark {
     val latch = new CountDownLatch(tasks)
     var i = 0
     while (i < tasks) {
-      IO(simpleComputation)
-        .map(_ => latch.countDown())
-        .unsafeRunAndForget()
+      val n = 163 + i // avoid constant-folding
+      val fiberSpawn =
+        IO(n.toDouble)
+          .map(math.sqrt)
+          .map(math.round)
+          .map(_.toInt)
+          .guarantee(IO(latch.countDown())) // run on completion
+          .start // fork a lightweight fiber
+
+      fiberSpawn.unsafeRunAndForget() // only starts the fork, not the work inline
       i += 1
     }
     latch.await()
@@ -38,8 +44,12 @@ class ManyTasksBenchmark {
     val latch = new CountDownLatch(tasks)
     var i = 0
     while (i < tasks) {
-      val z = ZIO.attempt(simpleComputation).map(_ => latch.countDown())
-      Unsafe.unsafe { implicit u => zioRuntime.unsafe.fork(z) }
+      val n = 163 + i
+      val z =
+        ZIO
+          .attempt(math.round(math.sqrt(n.toDouble)).toInt)
+          .ensuring(ZIO.succeed(latch.countDown()))
+      Unsafe.unsafe { implicit u => zioRuntime.unsafe.fork(z) } // fork fiber
       i += 1
     }
     latch.await()
@@ -51,7 +61,10 @@ class ManyTasksBenchmark {
     val latch = new CountDownLatch(tasks)
     var i = 0
     while (i < tasks) {
-      Task(simpleComputation).map(_ => latch.countDown()).start()
+      val n = 163 + i
+      Task(math.round(math.sqrt(n.toDouble)).toInt)
+        .map(_ => latch.countDown())
+        .start()
       i += 1
     }
     latch.await()
@@ -63,7 +76,10 @@ class ManyTasksBenchmark {
     val latch = new CountDownLatch(tasks)
     var i = 0
     while (i < tasks) {
-      rapid.v2.Task(simpleComputation).map(_ => latch.countDown()).start()
+      val n = 163 + i
+      rapid.v2.Task(math.round(math.sqrt(n.toDouble)).toInt)
+        .map(_ => latch.countDown())
+        .start()
       i += 1
     }
     latch.await()
