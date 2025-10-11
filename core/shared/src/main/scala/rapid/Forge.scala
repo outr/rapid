@@ -1,5 +1,7 @@
 package rapid
 
+import sourcecode._
+
 /**
  * A trait representing a factory for creating `Task` instances from an input value.
  *

@@ -2,7 +2,7 @@ package rapid
 
 import rapid.concurrency.ConcurrencyManager
 import rapid.monitor.TaskMonitor
-import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask, Taskable, UnitTask}
+import rapid.task.{CompletableTask, ErrorTask, FlatMapTask, PureTask, SingleTask, SleepTask}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.BuildFrom

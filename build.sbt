@@ -1,7 +1,7 @@
 // Scala versions
 val scala213 = "2.13.16"
 
-val scala3 = "3.3.6"
+val scala3 = "3.7.3"
 
 val scala2 = List(scala213)
 val allScalaVersions = scala3 :: scala2
@@ -51,6 +51,8 @@ ThisBuild / Test / parallelExecution := false
 
 ThisBuild / Test / logBuffered := false
 
+val sourcecodeVersion: String = "0.4.2"
+
 val scribeVersion: String = "3.17.0"
 
 /// Testing and Benchmarking Libraries
@@ -76,6 +78,7 @@ lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
   .settings(
     name := s"$projectName-core",
     libraryDependencies ++= Seq(
+      "com.lihaoyi" %%% "sourcecode" % sourcecodeVersion,
       "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
     )
   )

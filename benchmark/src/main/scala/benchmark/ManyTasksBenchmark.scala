@@ -3,7 +3,8 @@ package benchmark
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
-import rapid.Task
+import rapid.v2.Test2
+import rapid.{Task, Test3}
 import zio.{Runtime, Unsafe, ZIO}
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -51,6 +52,18 @@ class ManyTasksBenchmark {
     var i = 0
     while (i < tasks) {
       Task(simpleComputation).map(_ => latch.countDown()).start()
+      i += 1
+    }
+    latch.await()
+    assert(i == tasks)
+  }
+
+  @Benchmark
+  def rapid2Benchmark(): Unit = {
+    val latch = new CountDownLatch(tasks)
+    var i = 0
+    while (i < tasks) {
+      rapid.v2.Task(simpleComputation).map(_ => latch.countDown()).start()
       i += 1
     }
     latch.await()
