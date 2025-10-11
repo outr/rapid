@@ -45,7 +45,7 @@ trait Task[Return] {
     effect(Sleep(duration, tr))
   }
 
-  final def sync(): Return = exec(ExecutionMode.Synchronous).sync()
+  def sync(): Return = exec(ExecutionMode.Synchronous).sync()
 
   final def apply(): Return = sync()
 
