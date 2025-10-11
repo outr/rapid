@@ -1,4 +1,4 @@
-package rapid.v2
+package rapid
 
 import sourcecode.{Enclosing, File, Line}
 
@@ -12,7 +12,7 @@ import scala.util.Try
 // Interrupt / Cancel support
 object Test2 {
   def main(args: Array[String]): Unit = {
-    /*val task = Task
+    val task = Task
       .pure("Testing")
       .map(_.length)
       .map(_ * 30)
@@ -21,7 +21,7 @@ object Test2 {
     println("Run...")
     val fiber = task.start()
     val result = fiber.sync()
-    println(s"Result: $result")*/
+    println(s"Result: $result")
 
     /*val start = System.currentTimeMillis()
 

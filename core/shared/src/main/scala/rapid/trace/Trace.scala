@@ -1,4 +1,4 @@
-package rapid.v2
+package rapid.trace
 
 import sourcecode._
 
@@ -30,7 +30,6 @@ object Trace {
       System.arraycopy(tasks, 0, ste, 1, tasks.length)
       System.arraycopy(original, 1, ste, tasks.length + 1, original.length - 1)
 
-      //      val ste = traceList.flatMap(_.toSTE).toArray ++ throwable.getStackTrace
       throwable.setStackTrace(ste)
     }
     throwable

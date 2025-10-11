@@ -1,8 +1,8 @@
-package rapid.v2
+package rapid.fiber
 
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentLinkedQueue}
 
-private[v2] object SleepScheduler {
+private object SleepScheduler {
   private val queues = new ConcurrentHashMap[Long, ConcurrentLinkedQueue[Runnable]]()
 
   private val timer = new Thread(() => loop(), "rapid-v2-sleep-timer")
@@ -34,5 +34,6 @@ private[v2] object SleepScheduler {
     }
   }
 }
+
 
 

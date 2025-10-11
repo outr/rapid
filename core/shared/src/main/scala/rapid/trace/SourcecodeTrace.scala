@@ -1,4 +1,4 @@
-package rapid.v2
+package rapid.trace
 
 import sourcecode.{Enclosing, File, Line}
 

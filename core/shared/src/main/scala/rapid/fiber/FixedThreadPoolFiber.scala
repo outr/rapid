@@ -1,38 +1,69 @@
-package rapid.v2
+package rapid.fiber
+
+import rapid.task.{Completable, FlatMap, Pure, Sleep, Suspend, Taskable, UnitTask}
+import rapid.trace.Trace
+import rapid.{Fiber, Task}
 
 import java.util
 import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, ScheduledExecutorService, ThreadFactory, ThreadPoolExecutor, TimeUnit}
 
 case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
   // Minimal completion mechanics to avoid Future/Try allocations
-  private[this] val done = new CountDownLatch(1)
-  private[this] var result: Any = _
-  private[this] var failure: Throwable = null
+  private val done = new CountDownLatch(1)
+  private var result: Any = _
+  private var failure: Throwable = _
 
-  private[this] def completeSuccess(v: Any): Unit = { result = v; done.countDown() }
-  private[this] def completeFailure(t: Throwable): Unit = { failure = t; done.countDown() }
+  private def completeSuccess(v: Any): Unit = {
+    result = v
+    done.countDown()
+  }
+  private def completeFailure(t: Throwable): Unit = {
+    failure = t
+    done.countDown()
+  }
 
-  private[this] final class Interpreter(root: Task[Return]) extends Runnable {
-    private[this] val stack = new util.ArrayDeque[Any]()
-    private[this] var previous: Any = ()
+  private final class Interpreter(root: Task[Return]) extends Runnable {
+    private val stack = new util.ArrayDeque[Any]()
+    private var previous: Any = ()
+    // tracing support (mirrors SynchronousFiber)
+    private val TraceBufSize = 256
+    private val tracing = Trace.Enabled
+    private val traceBuf: Array[Trace] = if (tracing) new Array[Trace](TraceBufSize) else null
+    private var traceIdx = 0
+    private var lastTrace: Trace = Trace.empty
+
+    @inline private def record(tr: Trace): Unit = if (tracing && tr != Trace.empty) {
+      traceBuf(traceIdx & (TraceBufSize - 1)) = tr
+      traceIdx += 1
+    }
     // Reuse a single resume runnable to avoid per-sleep/callback allocation
-    private[this] val resumeRunnable: Runnable = new Runnable {
+    private val resumeRunnable: Runnable = new Runnable {
       override def run(): Unit = FixedThreadPoolFiber.executor.execute(Interpreter.this)
     }
 
     stack.push(root)
 
-    private[this] def stepLoop(scheduleOnYield: Boolean): Unit = {
+    private def stepLoop(scheduleOnYield: Boolean): Unit = {
       try {
         var continue = true
         while (continue && !stack.isEmpty) {
-          stack.pop() match {
+          def handle(value: Any): Unit = value match {
             case t: Task[_] =>
               t match {
                 case _: UnitTask => ()
+                case t: Taskable[_] => handle(t.toTask)
                 case Pure(r) => previous = r
-                case Suspend(f, _) => previous = f()
-                case Sleep(duration, _) =>
+                case Suspend(f, tr) =>
+                  if (tracing) {
+                    lastTrace = tr
+                    record(tr)
+                  }
+                  previous = f()
+                case Sleep(duration, tr) =>
+                  if (tracing) {
+                    lastTrace = tr
+                    record(tr)
+                  }
                   continue = false
                   val ms = duration.toMillis
                   if (ms >= 1000L) {
@@ -41,28 +72,47 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
                   } else {
                     FixedThreadPoolFiber.scheduler.schedule(resumeRunnable, ms, TimeUnit.MILLISECONDS)
                   }
-                case c@Completable(_) =>
+                case c: Completable[_] =>
+                  if (tracing) {
+                    lastTrace = c.trace
+                    record(c.trace)
+                  }
                   continue = false
                   c.onComplete {
-                    case scala.util.Success(v) => previous = v; resumeRunnable.run()
+                    case scala.util.Success(v) =>
+                      previous = v
+                      resumeRunnable.run()
                     case scala.util.Failure(t) => completeFailure(t)
                   }
-                case FlatMap(input, f, _) =>
-                  stack.push(f)
+                case FlatMap(input, f, tr) =>
+                  // When tracing, push (f, tr) so we can record on application
+                  if (tracing) stack.push((f, tr)) else stack.push(f)
                   stack.push(input)
               }
             case f: Function1[_, _] =>
               val next = f.asInstanceOf[Any => Task[Any]](previous)
               stack.push(next)
-            case (f: Function1[_, _], _) =>
+            case (f: Function1[_, _], tr: Trace) =>
+              if (tracing) {
+                lastTrace = tr
+                record(tr)
+              }
               val next = f.asInstanceOf[Any => Task[Any]](previous)
               stack.push(next)
           }
+          handle(stack.pop())
         }
         if (continue && stack.isEmpty) completeSuccess(previous)
         else if (!continue && scheduleOnYield) FixedThreadPoolFiber.executor.execute(this)
       } catch {
-        case t: Throwable => completeFailure(t)
+        case t: Throwable =>
+          if (tracing) {
+            val n = Math.min(traceIdx, TraceBufSize)
+            val frames = List.tabulate(n)(i => traceBuf((traceIdx - 1 - i) & (TraceBufSize - 1))).filter(_ != Trace.empty).distinct
+            completeFailure(Trace.update(t, frames))
+          } else {
+            completeFailure(t)
+          }
       }
     }
 
@@ -92,7 +142,7 @@ object FixedThreadPoolFiber {
   }
 
   // ForkJoinPool reduces contention for many tiny tasks via per-worker deques
-  private[v2] lazy val executor: ThreadPoolExecutor = new ThreadPoolExecutor(
+  private[fiber] lazy val executor: ThreadPoolExecutor = new ThreadPoolExecutor(
     Math.max(Runtime.getRuntime.availableProcessors() * 2, 8),
     Math.max(Runtime.getRuntime.availableProcessors() * 2, 8),
     60L,
@@ -102,7 +152,7 @@ object FixedThreadPoolFiber {
     new ThreadPoolExecutor.CallerRunsPolicy()
   )
 
-  private[v2] lazy val scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(
+  private lazy val scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(
     Math.max(Runtime.getRuntime.availableProcessors(), 4),
     new ThreadFactory {
       override def newThread(r: Runnable): Thread = {

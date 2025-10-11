@@ -1,4 +1,8 @@
-package rapid.v2
+package rapid.fiber
+
+import rapid.task.{Completable, FlatMap, Pure, Sleep, Suspend, Taskable, UnitTask}
+import rapid.trace.Trace
+import rapid.{Fiber, Task}
 
 import java.util
 import scala.annotation.tailrec
@@ -27,20 +31,30 @@ case class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
       // Finished
     } else {
       try {
-        stack.pop() match {
+        def handle(value: Any): Unit = value match {
           case task: Task[_] =>
             task match {
               case _: UnitTask => // Ignore
+              case t: Taskable[_] => handle(t.toTask)
               case Pure(value) =>
                 previous = value
               case Suspend(f, tr) =>
-                if (tracing) { lastTrace = tr; record(tr) }
+                if (tracing) {
+                  lastTrace = tr
+                  record(tr)
+                }
                 previous = f()
               case Sleep(duration, tr) =>
-                if (tracing) { lastTrace = tr; record(tr) }
+                if (tracing) {
+                  lastTrace = tr
+                  record(tr)
+                }
                 Thread.sleep(duration.toMillis)
-              case c@Completable(tr) =>
-                if (tracing) { lastTrace = tr; record(tr) }
+              case c: Completable[_] =>
+                if (tracing) {
+                  lastTrace = c.trace
+                  record(c.trace)
+                }
                 previous = c.sync()
               case FlatMap(input, f, tr) =>
                 // If tracing is OFF, avoid allocating a tuple
@@ -59,6 +73,7 @@ case class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
             val next = f.asInstanceOf[Any => Task[Any]](previous)
             stack.push(next)
         }
+        handle(stack.pop())
       } catch {
         case t: Throwable =>
           if (tracing) {

@@ -1,4 +1,6 @@
-package rapid.v2
+package rapid.fiber
+
+import rapid.{Fiber, Task}
 
 import scala.util.Try
 
