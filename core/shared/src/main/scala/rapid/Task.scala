@@ -17,7 +17,7 @@ import scala.util.{Failure, Success, Try}
  *
  * @tparam Return the type of the result produced by this task
  */
-trait Task[Return] {
+trait Task[+Return] {
   protected def trace: Trace
 
   protected def exec(mode: ExecutionMode): Fiber[Return] = mode match {
@@ -262,7 +262,7 @@ trait Task[Return] {
    *
    * @param repeat the Repeat implementation to use
    */
-  def repeat(repeat: Repeat[Return]): Task[Return] = repeat(this)
+  def repeat[R >: Return](repeat: Repeat[R]): Task[R] = repeat(this)
 
   /**
    * Sleeps until the condition is met (returns true) or timeout

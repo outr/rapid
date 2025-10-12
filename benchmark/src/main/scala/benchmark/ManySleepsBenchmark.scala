@@ -4,7 +4,6 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations.{Benchmark, BenchmarkMode, Mode, OutputTimeUnit, Scope, State}
 import rapid.Task
-import rapid.v2.Test2
 import zio.{Duration, Runtime, Unsafe, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -53,15 +52,6 @@ class ManySleepsBenchmark {
     val completed = new AtomicInteger(0)
     (1 to tasks).foreach { _ =>
       Task.sleep(sleepTime).map(_ => completed.incrementAndGet()).start()
-    }
-    waitForComplete(completed)
-  }
-
-  @Benchmark
-  def rapid2Benchmark(): Unit = {
-    val completed = new AtomicInteger(0)
-    (1 to tasks).foreach { _ =>
-      rapid.v2.Task.sleep(sleepTime).map(_ => completed.incrementAndGet()).start()
     }
     waitForComplete(completed)
   }

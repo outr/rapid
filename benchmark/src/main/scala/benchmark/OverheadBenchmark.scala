@@ -4,7 +4,6 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
 import rapid.Task
-import rapid.v2.Test2
 import zio.{Runtime, Unsafe, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -50,15 +49,6 @@ class OverheadBenchmark {
   def rapidBenchmark(): Unit = {
     val task = (1 to iterations).foldLeft(Task(0))((t, i) => t.flatMap { total =>
       Task(total + simpleComputation)
-    })
-    val result = task.await()
-    verify("Rapid", result)
-  }
-
-  @Benchmark
-  def rapid2Benchmark(): Unit = {
-    val task = (1 to iterations).foldLeft(rapid.v2.Task(0))((t, i) => t.flatMap { total =>
-      rapid.v2.Task(total + simpleComputation)
     })
     val result = task.sync()
     verify("Rapid", result)
