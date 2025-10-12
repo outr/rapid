@@ -1030,39 +1030,21 @@ object Stream {
   def merge[Return](streams: Task[Pull[Stream[Return]]]): Stream[Return] =
     new Stream[Return](
       streams.map { outerPull =>
-        val innerQueue = new ConcurrentLinkedQueue[Pull[Return]]()
-        // Each pull of the merged stream returns the next available step by
-        // prioritizing currently enqueued inner pulls; if none, it advances the outer.
-        outerPull.transform { stepTask => Task {
-          @annotation.tailrec
-          def loop(): Step[Return] = {
-            val inner = innerQueue.poll()
-            if (inner != null) {
-              // Delegate to drain this inner now; next poll will continue
-              Step.Concat(inner)
-            } else {
-              stepTask.sync() match {
-                case Step.Emit(stream) =>
-                  innerQueue.offer(stream.task.sync()); loop()
-                case Step.Skip => loop()
-                case Step.Concat(inner) => Step.Concat(inner.asInstanceOf[Pull[Return]])
-                case Step.Stop =>
-                  val next = innerQueue.poll()
-                  if (next == null) Step.Stop else Step.Concat(next)
-              }
+        val innerQueue = new java.util.concurrent.ConcurrentLinkedQueue[() => Pull[Return]]()
+        Pull.fromFunction[Return]({ () =>
+          val thunk = innerQueue.poll()
+          if (thunk != null) Step.Concat(thunk())
+          else {
+            outerPull.pull.sync() match {
+              case Step.Emit(stream) => innerQueue.offer(() => stream.task.sync()); Step.Skip
+              case Step.Skip => Step.Skip
+              case Step.Concat(inner) => Step.Concat(inner.asInstanceOf[Pull[Return]])
+              case Step.Stop =>
+                val t2 = innerQueue.poll()
+                if (t2 == null) Step.Stop else Step.Concat(t2())
             }
           }
-          loop()
-        }}.onClose(Task.defer {
-          var next = innerQueue.poll()
-          var acc: Task[Unit] = Task.unit
-          while (next != null) {
-            val p = next
-            acc = acc.flatMap(_ => p.close.handleError(_ => Task.unit))
-            next = innerQueue.poll()
-          }
-          acc
-        }.flatMap(_ => outerPull.close.handleError(_ => Task.unit)))
+        }, outerPull.close)
       }
     )
 
