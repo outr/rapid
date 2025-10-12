@@ -4,7 +4,7 @@ import org.scalatest.concurrent.{AsyncTimeLimitedTests, TimeLimitedTests}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Minute, Span}
 import org.scalatest.wordspec.AsyncWordSpec
-import rapid.{AsyncTaskSpec, Task}
+import rapid._
 
 import scala.concurrent.CancellationException
 import scala.concurrent.duration.DurationInt

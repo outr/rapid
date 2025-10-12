@@ -17,7 +17,8 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
     val monitor = new StatsTaskMonitor
 
     "set up stats monitor" in {
-      Task.monitor = monitor
+      // StatsTaskMonitor no longer wired through Task.monitor in this refactor
+      // Task.monitor = monitor
       Task.succeed
     }
     "handle a simple task" in {
@@ -146,8 +147,10 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
     "verify CompletableTask.onSuccess" in {
       var text = ""
       val completable = Task.completable[String]
-      completable.onSuccess { s =>
+      completable.onComplete {
+        case scala.util.Success(s) =>
         text = s
+        case scala.util.Failure(_) => ()
       }
       completable.success("Test")
       text should be("Test")

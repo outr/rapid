@@ -56,26 +56,34 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
     }
 
     @scala.annotation.tailrec
-    def loadNext(): Unit = {
+    def loadNext(current: Pull[T], stack: java.util.ArrayDeque[Pull[T]]): Unit = {
       if (failure.nonEmpty) {
         if (n > 0) flushBatch()
         _total = idx
       } else {
-        pull.pull() match {
-          case Some(t) =>
+        current.pull.sync() match {
+          case Step.Emit(t) =>
             batch(n) = (t, idx)
             n += 1
             idx += 1
             if (n == batchSize) flushBatch()
-            loadNext()
-          case None =>
-            if (n > 0) flushBatch()
-            _total = idx
+            loadNext(current, stack)
+          case Step.Skip =>
+            loadNext(current, stack)
+          case Step.Stop =>
+            if (!stack.isEmpty) loadNext(stack.pop(), stack)
+            else {
+              if (n > 0) flushBatch()
+              _total = idx
+            }
+          case Step.Concat(inner) =>
+            stack.push(current)
+            loadNext(inner, stack)
         }
       }
     }
 
-    try loadNext()
+    try loadNext(pull, new java.util.ArrayDeque[Pull[T]]())
     finally try pull.close.sync() catch { case _: Throwable => () }
   }.start()
 

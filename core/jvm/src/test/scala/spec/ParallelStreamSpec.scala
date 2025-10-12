@@ -71,10 +71,7 @@ class ParallelStreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests
     "close source Pull after processing" in {
       @volatile var closed = false
       val base = Pull.fromList(List(1, 2, 3))
-      val pull = new Pull[Int] {
-        override def pull(): Option[Int] = base.pull()
-        override def close: Task[Unit] = Task { closed = true }
-      }
+      val pull = Pull(base.pull, Task { closed = true })
       val ps = Stream(Task.pure(pull)).par() { i => Task.pure(i) }
       ps.count.sync() shouldEqual 3
       closed shouldBe true

@@ -18,7 +18,7 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val i = Task {
         5 * 5
       }
-      i.await() should be(25)
+      i.sync() should be(25)
     }
     "handle a simple task mapping" in {
       val i = Task {
@@ -27,22 +27,18 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val s = i.map { v =>
         s"Value: $v"
       }
-      s.await() should be("Value: 25")
+      s.sync() should be("Value: 25")
     }
     "handle flat mapping" in {
       val task = (1 to 10).foldLeft(Task(0))((t, i) => t.flatMap { total =>
         Task(total + i)
       })
-      val result = task.await()
+      val result = task.sync()
       result should be(55)
     }
     "chain fibers together" in {
       val start = System.currentTimeMillis()
-      Task.sleep(250.millis).start().flatMap { _ =>
-        Task.sleep(250.millis).start().flatMap { _ =>
-          Task.sleep(250.millis).start()
-        }
-      }.sync()
+      Task.sleep(250.millis).flatMap(_ => Task.sleep(250.millis)).flatMap(_ => Task.sleep(250.millis)).sync()
       val elapsed = System.currentTimeMillis() - start
       elapsed should be >= 750L
     }

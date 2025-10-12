@@ -3,43 +3,46 @@ package rapid
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 
 /** A simple, thread‑safe source of values of type T. */
-trait Pull[+T] {
-  /**
-   * Atomically pull the next element, if any.
-   * @return Some(next) if available, or None if exhausted.
-   */
-  def pull(): Option[T]
+case class Pull[+Return](pull: Task[Step[Return]], close: Task[Unit] = Task.unit) {
+  def transform[T](f: Task[Step[Return]] => Task[Step[T]]): Pull[T] = copy[T](f(pull))
 
-  def close: Task[Unit] = Task.unit
+  def onClose(task: Task[Unit]): Pull[Return] = copy(close = close.effect(task))
 }
 
 object Pull {
+  def fromFunction[T](pullF: () => Step[T], close: Task[Unit] = Task.unit): Pull[T] =
+    Pull(Task(pullF()), close)
   def fromList[T](list: List[T]): Pull[T] = {
     val state = new AtomicReference[List[T]](list)
-    () => {
+    val pull = Task {
       @annotation.tailrec
-      def loop(): Option[T] = {
+      def loop(): Step[T] = {
         val current = state.get()
         if (current.nonEmpty) {
           val head = current.head
           val tail = current.tail
-          if (state.compareAndSet(current, tail)) Some(head)
-          else loop()
+          if (state.compareAndSet(current, tail)) {
+            Step.Emit(head)
+          } else {
+            loop()
+          }
         } else {
-          None
+          Step.Stop
         }
       }
       loop()
     }
+    Pull(pull)
   }
 
   def fromIndexedSeq[T](seq: IndexedSeq[T]): Pull[T] = {
     val idx = new AtomicInteger(0)
     val len = seq.length
-    () => {
+    val pull = Task {
       val i = idx.getAndIncrement()
-      if (i < len) Some(seq(i)) else None
+      if (i < len) Step.Emit(seq(i)) else Step.Stop
     }
+    Pull(pull)
   }
 
   def fromSeq[T](seq: Seq[T]): Pull[T] = seq match {
@@ -50,8 +53,11 @@ object Pull {
 
   def fromIterator[T](iter: Iterator[T]): Pull[T] = {
     val lock = new AnyRef
-    () => lock.synchronized {
-      if (iter.hasNext) Some(iter.next()) else None
+    val pull = Task {
+      lock.synchronized {
+        if (iter.hasNext) Step.Emit(iter.next()) else Step.Stop
+      }
     }
+    Pull(pull)
   }
 }

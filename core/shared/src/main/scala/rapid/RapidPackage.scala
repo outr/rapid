@@ -12,4 +12,10 @@ trait RapidPackage {
   implicit def taskTaskOps[Return](task: Task[Task[Return]]): TaskTaskOps[Return] = TaskTaskOps(task)
   implicit def byteStream(stream: Stream[Byte]): ByteStreamOps = ByteStreamOps(stream)
   implicit def charStream(stream: Stream[Char]): CharStreamOps = CharStreamOps(stream)
+
+  implicit final class FiberOps[+A](private val fiber: Fiber[A]) {
+    def map[B](f: A => B): Task[B] = Task(f(fiber.sync()))
+    def flatMap[B](f: A => Task[B]): Task[B] = f(fiber.sync())
+    def cancel: Task[Boolean] = Task.pure(false)
+  }
 }

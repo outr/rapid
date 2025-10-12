@@ -103,7 +103,6 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
           handle(stack.pop())
         }
         if (continue && stack.isEmpty) completeSuccess(previous)
-        else if (!continue && scheduleOnYield) FixedThreadPoolFiber.executor.execute(this)
       } catch {
         case t: Throwable =>
           if (tracing) {
@@ -122,8 +121,8 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
     override def run(): Unit = stepLoop(scheduleOnYield = true)
   }
 
-  // Kick off with a priming pass inline: most sleep-heavy tasks yield immediately without occupying the pool
-  new Interpreter(task).prime()
+  // Always schedule on the executor to avoid deadlocks/starvation in parallel operations
+  FixedThreadPoolFiber.executor.execute(new Interpreter(task))
 
   override def sync(): Return = {
     done.await()

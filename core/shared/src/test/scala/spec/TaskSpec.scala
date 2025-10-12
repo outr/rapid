@@ -14,25 +14,25 @@ class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   "Tasks" should {
     "execute a simple task" in {
       val task = Task { 5 * 5 }
-      task.await() shouldEqual 25
+      task.sync() shouldEqual 25
     }
     "map a task result" in {
       val task = Task { 5 * 5 }
       val mappedTask = task.map { result => s"Result: $result" }
-      mappedTask.await() shouldEqual "Result: 25"
+      mappedTask.sync() shouldEqual "Result: 25"
     }
     "flatMap tasks" in {
       val task = Task { 5 * 5 }
       val flatMappedTask = task.flatMap { result => Task { result + 10 } }
-      flatMappedTask.await() shouldEqual 35
+      flatMappedTask.sync() shouldEqual 35
     }
     "handle task failures" in {
       val task = Task { throw new RuntimeException("Failure") }
-      an[RuntimeException] should be thrownBy task.await()
+      an[RuntimeException] should be thrownBy task.sync()
     }
     "sleep for a duration" in {
       val start = System.currentTimeMillis()
-      Task.sleep(500.millis).await()
+      Task.sleep(500.millis).sync()
       val elapsed = System.currentTimeMillis() - start
       elapsed should be >= 500L
     }
@@ -42,7 +42,7 @@ class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       Task.sleep(500.millis).map { _ =>
         c.success("Success!")
       }.start()
-      val result = c.await()
+      val result = c.sync()
       result should be("Success!")
       val elapsed = System.currentTimeMillis() - start
       elapsed should be >= 500L
@@ -63,16 +63,16 @@ class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       )
       list.tasksPar.map { list =>
         list should be(List("One", "Two", "Three"))
-      }.await()
+      }.sync()
     }
     "process a longer list of tasks with delays in parallel" in {
       (0 until 100_000).map(i => Task.sleep(500.millis).map(_ => i * 2)).tasksPar.map { list =>
         list.sum should be(1409965408)
-      }.await()
+      }.sync()
     }
     "parallel process a list of zero tasks" in {
       val list: List[Task[String]] = Nil
-      list.tasksPar.map(list => list should be(Nil)).await()
+      list.tasksPar.map(list => list should be(Nil)).sync()
     }
     "handle repeat functionality" in {
       var counter = 0

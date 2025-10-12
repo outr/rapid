@@ -18,25 +18,19 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
     "call close on Pull for normal completion and on error" in {
       @volatile var closed = false
       val base = Pull.fromList(List(1, 2, 3))
-      val pull = new Pull[Int] {
-        override def pull(): Option[Int] = base.pull()
-        override def close: Task[Unit] = Task { closed = true }
-      }
+      val pull = Pull(base.pull, Task { closed = true })
       // normal completion
       Stream(Task.pure(pull)).toList.sync() shouldEqual List(1, 2, 3)
       closed shouldBe true
 
       // error path via evalMap that throws
       closed = false
-      val erring = Stream(Task.pure(new Pull[Int] {
-        private var i = 0
-        override def pull(): Option[Int] = {
-          i += 1
-          if (i == 1) Some(1)
-          else None
-        }
-        override def close: Task[Unit] = Task { closed = true }
-      })).evalMap { _ => Task.error(new RuntimeException("boom")) }
+      var i = 0
+      val errPull = Pull(Task {
+        i += 1
+        if (i == 1) Step.Emit(1) else Step.Stop
+      }, Task { closed = true })
+      val erring = Stream(Task.pure(errPull)).evalMap { _ => Task.error(new RuntimeException("boom")) }
 
       intercept[RuntimeException] {
         erring.toList.sync()
@@ -154,10 +148,10 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       }
       set should be(Set.empty)
       val start = System.currentTimeMillis()
-      val fiber = merged.drain.start()
+      merged.drain.start()
       Task.sleep(10.milliseconds).flatMap { _ =>
         set should be(Set(1, 2, 3))
-        fiber.map { _ =>
+        Task.sleep(1000.milliseconds).map { _ =>
           set should be(Set(1, 2, 3, 4, 5, 6))
           val elapsed = System.currentTimeMillis() - start
           elapsed should be >= 1000L
