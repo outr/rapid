@@ -8,18 +8,23 @@ import java.util
 import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, ScheduledExecutorService, ThreadFactory, ThreadPoolExecutor, TimeUnit}
 
 case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
-  // Minimal completion mechanics to avoid Future/Try allocations
-  private val done = new CountDownLatch(1)
+  // Minimal completion mechanics with lazy latch to avoid per-fiber allocation when not awaited
+  @volatile private var completed: Boolean = false
+  @volatile private var failure: Throwable = null
   private var result: Any = _
-  private var failure: Throwable = _
+  private var done: CountDownLatch = _
 
   private def completeSuccess(v: Any): Unit = {
     result = v
-    done.countDown()
+    completed = true
+    val l = done
+    if (l ne null) l.countDown()
   }
   private def completeFailure(t: Throwable): Unit = {
     failure = t
-    done.countDown()
+    completed = true
+    val l = done
+    if (l ne null) l.countDown()
   }
 
   private final class Interpreter(root: Task[Return]) extends Runnable {
@@ -125,8 +130,16 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
   FixedThreadPoolFiber.executor.execute(new Interpreter(task))
 
   override def sync(): Return = {
-    done.await()
-    if (failure ne null) throw failure
+    if (!completed) {
+      var l = done
+      if (l eq null) this.synchronized {
+        if (done eq null) done = new CountDownLatch(1)
+        l = done
+      }
+      if (!completed) l.await()
+    }
+    val f = failure
+    if (f ne null) throw f
     result.asInstanceOf[Return]
   }
 }
@@ -140,7 +153,7 @@ object FixedThreadPoolFiber {
     }
   }
 
-  // ForkJoinPool reduces contention for many tiny tasks via per-worker deques
+  // ThreadPoolExecutor with a large bounded queue performs well for many tiny tasks
   private[fiber] lazy val executor: ThreadPoolExecutor = new ThreadPoolExecutor(
     Math.max(Runtime.getRuntime.availableProcessors() * 2, 8),
     Math.max(Runtime.getRuntime.availableProcessors() * 2, 8),
@@ -161,4 +174,7 @@ object FixedThreadPoolFiber {
       }
     }
   )
+
+  /** Public entry to schedule a runnable onto the fiber executor. */
+  def execute(runnable: Runnable): Unit = executor.execute(runnable)
 }

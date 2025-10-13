@@ -61,6 +61,8 @@ class ManyTasksBenchmark {
     var i = 0
     while (i < tasks) {
       val n = 163 + i
+//      Task.suspend(() => { val r = math.round(math.sqrt(n.toDouble)).toInt; latch.countDown(); r })
+//        .startUnit()
       Task(math.round(math.sqrt(n.toDouble)).toInt)
         .map(_ => latch.countDown())
         .start()

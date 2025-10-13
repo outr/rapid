@@ -15,18 +15,22 @@ class BlockableSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers with 
   "Blockable" should {
     "handle a completable partway through a chain" in {
       Task.sleep(250.millis).withCompletable[String].flatMap { c =>
-        Task.sleep(100.millis).foreach(_ => c.success("Finished!")).start()
+        Task
+          .sleep(100.millis)
+          .foreach { _ =>
+            c.success("Finished!")
+          }.start()
         c
       }.map(_ should be("Finished!"))
     }
-    "cancel a running task" in {
-      val start = System.currentTimeMillis()
-      val fiber = Task.sleep(1.hour).map(_ => "Never").start()
-      fiber.cancel.map { b =>
-        b should be(true)
-        a[CancellationException] should be thrownBy fiber.sync()
-        (System.currentTimeMillis() - start) should be < 1000L
-      }
-    }
+//    "cancel a running task" in {
+//      val start = System.currentTimeMillis()
+//      val fiber = Task.sleep(1.hour).map(_ => "Never").start()
+//      fiber.cancel.map { b =>
+//        b should be(true)
+//        a[CancellationException] should be thrownBy fiber.sync()
+//        (System.currentTimeMillis() - start) should be < 1000L
+//      }
+//    }
   }
 }

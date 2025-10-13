@@ -78,7 +78,7 @@ trait Task[+Return] {
    * @param f the function to apply to underlying value
    * @return Task[Return]
    */
-  def foreach(f: Return => Unit): Task[Return] = map { r =>
+  def foreach(f: Return => Unit)(implicit file: File, line: Line, enclosing: Enclosing): Task[Return] = map { r =>
     f(r)
     r
   }
@@ -94,6 +94,9 @@ trait Task[+Return] {
     val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
     FlatMap(this, f, tr)
   }
+
+  def forge[R >: Return, T](forge: Forge[R, T])(implicit file: File, line: Line, enclosing: Enclosing): Task[T] =
+    flatMap(forge(_))
 
   /**
    * Works like flatMap, but ignores the previous value.
@@ -165,7 +168,7 @@ trait Task[+Return] {
    * @tparam T the type of the result produced by the task
    * @return a new Completable task
    */
-  def withCompletable[T]: Task[Completable[T]] = flatMap(_ => Task.completable)
+  def withCompletable[T]: Task[Completable[T]] = map(_ => Task.completable)
 
   /**
    * Convenience conditional execution of the Task. If the condition is true, the task will execute the instruction set,
@@ -354,6 +357,26 @@ trait Task[+Return] {
   final def start: Task[Fiber[Return]] = Suspend(() => exec(ExecutionMode.Asynchronous), Trace.empty)
 
   /**
+   * Specialized fire-and-forget start that avoids Fiber/latch. Optimized for simple Suspend tasks.
+   */
+  final def startUnit(): Unit = this match {
+    case Suspend(f, _) => rapid.fiber.FixedThreadPoolFiber.execute(new Runnable { override def run(): Unit = f(); })
+    case _ => rapid.fiber.FixedThreadPoolFiber.execute(new Runnable { override def run(): Unit = try SynchronousFiber(Task.this).sync() catch { case _: Throwable => () } })
+  }
+
+  /**
+   * Fire-and-forget execution: schedule on the async executor without returning a Fiber.
+   * Useful in benchmarks or cases where you only need completion side-effects.
+   */
+  final def runAsync(): Unit = {
+    rapid.fiber.FixedThreadPoolFiber.execute(new Runnable {
+      override def run(): Unit = {
+        try rapid.fiber.SynchronousFiber(Task.this).sync() catch { case _: Throwable => () }
+      }
+    })
+  }
+
+  /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
    */
   def toFuture(implicit ec: scala.concurrent.ExecutionContext): scala.concurrent.Future[Return] =
@@ -414,6 +437,9 @@ object Task extends UnitTask {
 
   def apply[T](f: => T)(implicit file: File, line: Line, enclosing: Enclosing): Task[T] =
     Suspend(() => f, Trace(file, line, enclosing))
+
+  /** No-trace constructor to avoid sourcecode implicits in hot paths */
+  def suspend[T](f: () => T): Task[T] = Suspend(f, Trace.empty)
 
   def completable[T](implicit file: File, line: Line, enclosing: Enclosing): Completable[T] =
     Completable[T](Trace(file, line, enclosing))

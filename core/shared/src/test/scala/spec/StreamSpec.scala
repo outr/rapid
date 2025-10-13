@@ -388,6 +388,39 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
     "toVector collects all elements" in {
       Stream.emits(List(5, 6, 7)).toVector.sync() shouldEqual Vector(5, 6, 7)
     }
+    "guarantee a result with success" in {
+      var triggered = false
+      Stream(1, 2, 3).guarantee(Task {
+        triggered = true
+      }).sum.map { total =>
+        total should be(6)
+        triggered should be(true)
+      }.sync()
+    }
+    "guarantee a result with failure" in {
+      var triggered = false
+      Stream(1, 2, 3).guarantee(Task {
+        triggered = true
+      }).map { i =>
+        if (i == 2) throw new RuntimeException("i = 2!")
+      }.drain.attempt.map { result =>
+        result.isFailure should be(true)
+        triggered should be(true)
+      }.sync()
+    }
+    "do something every N millis" in {
+      var checks = List.empty[Int]
+      Stream
+        .emits(1 to 100)
+        .evalMap(i => Task.sleep(10.millis).map(_ => i))
+        .every(100.millis) { i =>
+          checks = i :: checks
+          Task.unit
+        }
+        .drain
+        .sync()
+      checks should be(List(99, 89, 79, 69, 59, 49, 39, 29, 19, 9))
+    }
     "ParallelStream toList preserves input order and filters None" in {
       val in  = 1 to 20
       val ps  = Stream.emits(in).par(maxThreads = 4, maxBuffer = 64) { i =>

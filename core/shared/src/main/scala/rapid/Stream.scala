@@ -85,7 +85,6 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    *                  and returns true if the current element should be included.
    * @return A new stream consisting of the first element and all subsequent elements
    *         that satisfy the predicate when compared to the first.
-   *
    * @example
    * {{{
    *   Stream(10, 11, 12, 50, 51).takeWhileWithFirst((first, current) => (current - first) < 10)
@@ -96,10 +95,21 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     var firstOpt: Option[Return] = None
     var done = false
     transform { next =>
-      if (done) Step.Stop
-      else firstOpt match {
-        case None => firstOpt = Some(next); Step.Emit(next)
-        case Some(first) => if (predicate(first, next)) Step.Emit(next) else { done = true; Step.Stop }
+      if (done) {
+        Step.Stop
+      } else {
+        firstOpt match {
+          case None =>
+            firstOpt = Some(next)
+            Step.Emit(next)
+          case Some(first) =>
+            if (predicate(first, next)) {
+              Step.Emit(next)
+            } else {
+              done = true
+              Step.Stop
+            }
+        }
       }
     }
   }
@@ -119,7 +129,10 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @param f the function to handle each value
    * @return Stream[Return]
    */
-  def foreach(f: Return => Unit): Stream[Return] = transform { a => f(a); Step.Emit(a) }
+  def foreach(f: Return => Unit): Stream[Return] = transform { a =>
+    f(a)
+    Step.Emit(a)
+  }
 
   /**
    * Transforms the values in the stream to include the index of the value within the stream
@@ -127,7 +140,9 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   def zipWithIndex: Stream[(Return, Int)] = {
     var i = 0
     transform { r =>
-      val idx = i; i += 1; Step.Emit((r, idx))
+      val idx = i
+      i += 1
+      Step.Emit((r, idx))
     }
   }
 
@@ -186,7 +201,35 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   /**
    * Synonym for evalTap
    */
-  def evalForeach(f: Return => Task[Unit]): Stream[Return] = transform { a => f(a).sync(); Step.Emit(a) }
+  def evalForeach(f: Return => Task[Unit]): Stream[Return] = transform { a =>
+    f(a).sync()
+    Step.Emit(a)
+  }
+
+  def every(duration: FiniteDuration, onlyOnChange: Boolean = false)
+           (f: Return => Task[Unit]): Stream[Return] = {
+    var keepAlive = true
+    var current = Option.empty[Return]
+    var previous = Option.empty[Return]
+    new Stream[Return](task.map { pull =>
+      val start = System.currentTimeMillis()
+      Task.condition(Task.defer {
+        val t = current match {
+          case Some(r) if !onlyOnChange || current != previous =>
+            previous = current
+            f(r)
+          case _ => Task.unit
+        }
+        t.pure(!keepAlive)
+      }, delay = duration).start()
+      pull.onClose(Task {
+        keepAlive = false
+      })
+    }).map { r =>
+      current = Some(r)
+      r
+    }
+  }
 
   /**
    * Chunks the stream's values into vectors of size `size` (except possibly the last).
@@ -205,8 +248,14 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
           case Step.Emit(r) =>
             buf += r
             count += 1
-            if (count >= chunkSize) { val out = buf.result(); buf.clear(); count = 0; Step.Emit(out) }
-            else Step.Skip
+            if (count >= chunkSize) {
+              val out = buf.result()
+              buf.clear()
+              count = 0
+              Step.Emit(out)
+            } else {
+              Step.Skip
+            }
           case Step.Skip => Step.Skip
           case Step.Stop => Step.Stop
           case Step.Concat(inner) => Step.Concat(inner.transform(mapStep))
@@ -217,7 +266,10 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
         st.map {
           case Step.Stop if count > 0 && !flushed =>
             flushed = true
-            val out = buf.result(); buf.clear(); count = 0; Step.Emit(out)
+            val out = buf.result()
+            buf.clear()
+            count = 0
+            Step.Emit(out)
           case s @ Step.Stop => s
           case e @ Step.Emit(_) => e
           case s @ Step.Skip => s
@@ -240,18 +292,27 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       var pendingFlush: Option[Grouped[G, R]] = None
       Pull.fromFunction[Grouped[G, R]]({ () =>
         if (pendingFlush.nonEmpty) {
-          val out = pendingFlush.get; pendingFlush = None; Step.Emit(out)
+          val out = pendingFlush.get
+          pendingFlush = None
+          Step.Emit(out)
         } else {
           @annotation.tailrec
           def loop(): Step[Grouped[G, R]] = pullR.pull.sync() match {
             case Step.Emit(r) =>
               val k = grouper(r)
               curKey match {
-                case None => curKey = Some(k); buf += r; loop()
-                case Some(ck) if ck == k => buf += r; loop()
+                case None =>
+                  curKey = Some(k)
+                  buf += r
+                  loop()
+                case Some(ck) if ck == k =>
+                  buf += r
+                  loop()
                 case Some(ck) =>
                   val out = Grouped(ck, buf.toList)
-                  buf.clear(); curKey = Some(k); buf += r
+                  buf.clear()
+                  curKey = Some(k)
+                  buf += r
                   Step.Emit(out)
               }
             case Step.Skip => loop()
@@ -262,16 +323,17 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
               curKey match {
                 case Some(ck) if buf.nonEmpty =>
                   val out = Grouped(ck, buf.toList)
-                  buf.clear(); curKey = None
+                  buf.clear()
+                  curKey = None
                   Step.Emit(out)
                 case _ => Step.Stop
               }
           }
+
           loop()
         }
       }, pullR.close)
     })
-  
 
   /**
    * Groups at a separator
@@ -284,13 +346,30 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       Pull.fromFunction[List[Return]]({ () =>
         @annotation.tailrec
         def nextGroup(): Step[List[Return]] = pullR.pull.sync() match {
-          case Step.Emit(r) if !separator(r) => buf += r; nextGroup()
+          case Step.Emit(r) if !separator(r) =>
+            buf += r
+            nextGroup()
           case Step.Emit(_) =>
-            if (buf.nonEmpty) { val out = buf.toList; buf.clear(); Step.Emit(out) } else nextGroup()
+            if (buf.nonEmpty) {
+              val out = buf.toList
+              buf.clear()
+              Step.Emit(out)
+            } else {
+              nextGroup()
+            }
           case Step.Skip => nextGroup()
-          case Step.Concat(inner) => Step.Concat(inner.transform(_ => Task.pure(Step.Skip))).asInstanceOf[Step[List[Return]]]
-          case Step.Stop => if (buf.nonEmpty) { val out = buf.toList; buf.clear(); Step.Emit(out) } else Step.Stop
+          case Step.Concat(inner) =>
+            Step.Concat(inner.transform(_ => Task.pure(Step.Skip))).asInstanceOf[Step[List[Return]]]
+          case Step.Stop =>
+            if (buf.nonEmpty) {
+              val out = buf.toList
+              buf.clear()
+              Step.Emit(out)
+            } else {
+              Step.Stop
+            }
         }
+
         nextGroup()
       }, pullR.close)
     })
@@ -306,11 +385,15 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     val dropping = new AtomicBoolean(true)
     transform { r =>
       if (dropping.get()) {
-        if (p(r)) Step.Skip else {
+        if (p(r)) {
+          Step.Skip
+        } else {
           dropping.set(false)
           Step.Emit(r)
         }
-      } else Step.Emit(r)
+      } else {
+        Step.Emit(r)
+      }
     }
   }
 
@@ -336,7 +419,10 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             while (buf.size >= size) {
               outs += buf.take(size).toVector
               var i = 0
-              while (i < step && buf.nonEmpty) { buf.dequeue(); i += 1 }
+              while (i < step && buf.nonEmpty) {
+                buf.dequeue()
+                i += 1
+              }
             }
             if (outs.isEmpty) Step.Skip
             else if (outs.size == 1) Step.Emit(outs.head)
@@ -347,7 +433,10 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             while (buf.nonEmpty) {
               outs += buf.take(size).toVector
               var i = 0
-              while (i < step && buf.nonEmpty) { buf.dequeue(); i += 1 }
+              while (i < step && buf.nonEmpty) {
+                buf.dequeue()
+                i += 1
+              }
             }
             if (outs.isEmpty) Step.Stop else Step.Concat(Pull.fromList(outs.toList))
           case Step.Concat(inner) => Step.Concat(inner.transform(mapStep))
@@ -356,6 +445,10 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       pullR.transform(mapStep)
     })
   }
+
+  def guarantee(task: Task[Unit]): Stream[Return] = new Stream[Return](this.task.map { pull =>
+    pull.onClose(task)
+  })
 
   def find(p: Return => Boolean): Task[Option[Return]] =
     task.flatMap { pullR =>
@@ -369,15 +462,24 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case Step.Emit(r) => if (p(r)) result = Some(r)
             case Step.Skip => ()
             case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) => stack.push(current); current = inner
+            case Step.Concat(inner) =>
+              stack.push(current)
+              current = inner
           }
         }
         // Close all pulls
         try {
           current.close.handleError(_ => Task.unit).sync()
-        } catch { case _: Throwable => () }
+        } catch {
+          case _: Throwable => ()
+        }
         while (!stack.isEmpty) {
-          val p = stack.pop(); try p.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () }
+          val p = stack.pop()
+          try {
+            p.close.handleError(_ => Task.unit).sync()
+          } catch {
+            case _: Throwable => ()
+          }
         }
         result
       }.guarantee(pullR.close.handleError(_ => Task.unit))
@@ -397,11 +499,24 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case Step.Emit(r) => if (!p(r)) ok = false
             case Step.Skip => ()
             case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) => stack.push(current); current = inner
+            case Step.Concat(inner) =>
+              stack.push(current)
+              current = inner
           }
         }
-        try { current.close.handleError(_ => Task.unit).sync() } catch { case _: Throwable => () }
-        while (!stack.isEmpty) { val p0 = stack.pop(); try p0.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () } }
+        try {
+          current.close.handleError(_ => Task.unit).sync()
+        } catch {
+          case _: Throwable => ()
+        }
+        while (!stack.isEmpty) {
+          val p0 = stack.pop()
+          try {
+            p0.close.handleError(_ => Task.unit).sync()
+          } catch {
+            case _: Throwable => ()
+          }
+        }
         ok
       }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
@@ -449,11 +564,14 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
                 case Step.Emit(a) => out = Some(a)
                 case Step.Skip => ()
                 case Step.Stop => if (stack.isEmpty) done = true else cur = stack.pop()
-                case Step.Concat(in2) => stack.push(cur); cur = in2
+                case Step.Concat(in2) =>
+                  stack.push(cur)
+                  cur = in2
               }
             }
             out
           }
+
           def nextB(): Option[T2] = {
             val stack = new java.util.ArrayDeque[Pull[T2]]()
             var cur: Pull[T2] = pullB
@@ -461,14 +579,17 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             var done = false
             while (!done && out.isEmpty) {
               cur.pull.sync() match {
-                case Step.Emit(b) => out = Some(b)
+                case e @ Step.Emit(_) => out = Some(e.value)
                 case Step.Skip => ()
                 case Step.Stop => if (stack.isEmpty) done = true else cur = stack.pop()
-                case Step.Concat(in2) => stack.push(cur); cur = in2
+                case e @ Step.Concat(_) =>
+                  stack.push(cur)
+                  cur = e.pull
               }
             }
             out
           }
+
           (nextA(), nextB()) match {
             case (Some(a), Some(b)) => Step.Emit((a, b))
             case _ => Step.Stop
@@ -490,14 +611,23 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             var done = false
             while (!done && out.isEmpty) {
               cur.pull.sync() match {
-                case Step.Emit(a) => out = Some(a)
+                case e @ Step.Emit(_) => out = Some(e.value)
                 case Step.Skip => ()
-                case Step.Stop => if (stack.isEmpty) { done = true; aDone = true } else cur = stack.pop()
-                case Step.Concat(in2) => stack.push(cur); cur = in2
+                case Step.Stop =>
+                  if (stack.isEmpty) {
+                    done = true
+                    aDone = true
+                  } else {
+                    cur = stack.pop()
+                  }
+                case e @ Step.Concat(_) =>
+                  stack.push(cur)
+                  cur = e.pull
               }
             }
             out
           }
+
           def nextB(): Option[T2] = if (bDone) None else {
             val stack = new java.util.ArrayDeque[Pull[T2]]()
             var cur: Pull[T2] = pullB
@@ -505,14 +635,23 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             var done = false
             while (!done && out.isEmpty) {
               cur.pull.sync() match {
-                case Step.Emit(b) => out = Some(b)
+                case e @ Step.Emit(_) => out = Some(e.value)
                 case Step.Skip => ()
-                case Step.Stop => if (stack.isEmpty) { done = true; bDone = true } else cur = stack.pop()
-                case Step.Concat(in2) => stack.push(cur); cur = in2
+                case Step.Stop =>
+                  if (stack.isEmpty) {
+                    done = true
+                    bDone = true
+                  } else {
+                    cur = stack.pop()
+                  }
+                case e: Step.Concat[_] =>
+                  stack.push(cur)
+                  cur = e.pull
               }
             }
             out
           }
+
           val a = nextA().orElse(if (!bDone) Some(thisElem) else None)
           val b = nextB().orElse(if (!aDone) Some(otherElem) else None)
           (a, b) match {
@@ -528,7 +667,7 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   }
 
   def partition(p: Return => Boolean): (Stream[Return], Stream[Return]) = {
-    val left  = this.filter(p)
+    val left = this.filter(p)
     val right = this.filterNot(p)
     (left, right)
   }
@@ -551,8 +690,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case Step.Concat(inner) => stack.push(current); current = inner
           }
         }
-        try { current.close.handleError(_ => Task.unit).sync() } catch { case _: Throwable => () }
-        while (!stack.isEmpty) { val p0 = stack.pop(); try p0.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () } }
+        try {
+          current.close.handleError(_ => Task.unit).sync()
+        } catch {
+          case _: Throwable => ()
+        }
+        while (!stack.isEmpty) {
+          val p0 = stack.pop()
+          try {
+            p0.close.handleError(_ => Task.unit).sync()
+          } catch {
+            case _: Throwable => ()
+          }
+        }
         m.iterator.map { case (k, buf) => k -> buf.toList }.toMap
       }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
@@ -570,13 +720,20 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
         that.task.map { pullT =>
           // Prefer values from first, then second when first stops
           var firstDone = false
-          pullR.transform { stepTask => stepTask.map {
-            case Step.Emit(a) => Step.Emit(a)
-            case Step.Skip => Step.Skip
-            case Step.Concat(inner) => Step.Concat(inner)
-            case Step.Stop =>
-              if (!firstDone) { firstDone = true; Step.Concat(pullT) } else Step.Stop
-          }}.onClose(pullR.close.flatMap(_ => pullT.close))
+          pullR.transform { stepTask =>
+            stepTask.map {
+              case Step.Emit(a) => Step.Emit(a)
+              case Step.Skip => Step.Skip
+              case Step.Concat(inner) => Step.Concat(inner)
+              case Step.Stop =>
+                if (!firstDone) {
+                  firstDone = true
+                  Step.Concat(pullT)
+                } else {
+                  Step.Stop
+                }
+            }
+          }.onClose(pullR.close.flatMap(_ => pullT.close))
         }
       }
     )
@@ -594,33 +751,42 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   def onFinalize(fin: Task[Unit]): Stream[Return] = new Stream[Return](
     task.map { pullR =>
       val fired = new java.util.concurrent.atomic.AtomicBoolean(false)
-      pullR.transform { stepTask => Task {
-        try {
-          val next = stepTask.sync()
-          next match {
-            case Step.Stop if fired.compareAndSet(false, true) => fin.handleError(_ => Task.unit).sync(); Step.Stop
-            case other => other
+      pullR.transform { stepTask =>
+        Task {
+          try {
+            val next = stepTask.sync()
+            next match {
+              case Step.Stop if fired.compareAndSet(false, true) =>
+                fin.handleError(_ => Task.unit).sync()
+                Step.Stop
+              case other => other
+            }
+          } catch {
+            case t: Throwable =>
+              if (fired.compareAndSet(false, true)) {
+                fin.handleError(_ => Task.unit).sync()
+              }
+              throw t
           }
-        } catch {
-          case t: Throwable =>
-            if (fired.compareAndSet(false, true)) fin.handleError(_ => Task.unit).sync()
-            throw t
         }
-      }}
+      }
     }
   )
 
   /** Run `fin(t)` if the pull throws; useful for logging/cleanup on error. */
   def onErrorFinalize(fin: Throwable => Task[Unit]): Stream[Return] = new Stream[Return](
     task.map { pullR =>
-      pullR.transform { stepTask => Task {
-        try stepTask.sync()
-        catch {
-          case t: Throwable =>
-            fin(t).handleError(_ => Task.unit).sync()
-            throw t
+      pullR.transform { stepTask =>
+        Task {
+          try {
+            stepTask.sync()
+          } catch {
+            case t: Throwable =>
+              fin(t).handleError(_ => Task.unit).sync()
+              throw t
+          }
         }
-      }}
+      }
     }
   )
 
@@ -646,7 +812,7 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * Folds through the stream returning the last value
    *
    * @param initial the initial T to start with
-   * @param f the processing function
+   * @param f       the processing function
    * @tparam T the resulting type
    * @return Task[T]
    */
@@ -666,8 +832,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
           }
         }
         // Close all pulls
-        try { current.close.handleError(_ => Task.unit).sync() } catch { case _: Throwable => () }
-        while (!stack.isEmpty) { val p0 = stack.pop(); try p0.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () } }
+        try {
+          current.close.handleError(_ => Task.unit).sync()
+        } catch {
+          case _: Throwable => ()
+        }
+        while (!stack.isEmpty) {
+          val p0 = stack.pop()
+          try {
+            p0.close.handleError(_ => Task.unit).sync()
+          } catch {
+            case _: Throwable => ()
+          }
+        }
         Task.pure(acc)
       }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
@@ -704,7 +881,6 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       Stream.force(handleEnd(cursor).map(c => Stream.emits(c.history)))
     }
   }
-
 
   /**
    * Reduces the elements of this stream using the given binary operator,
@@ -757,8 +933,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
           case Step.Concat(inner) => stack.push(current); current = inner
         }
       }
-      try { current.close.handleError(_ => Task.unit).sync() } catch { case _: Throwable => () }
-      while (!stack.isEmpty) { val p0 = stack.pop(); try p0.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () } }
+      try {
+        current.close.handleError(_ => Task.unit).sync()
+      } catch {
+        case _: Throwable => ()
+      }
+      while (!stack.isEmpty) {
+        val p0 = stack.pop()
+        try {
+          p0.close.handleError(_ => Task.unit).sync()
+        } catch {
+          case _: Throwable => ()
+        }
+      }
       result
     }.guarantee(pullR.close.handleError(_ => Task.unit))
   }
@@ -783,8 +970,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case Step.Concat(inner) => stack.push(current); current = inner
           }
         }
-        try { current.close.handleError(_ => Task.unit).sync() } catch { case _: Throwable => () }
-        while (!stack.isEmpty) { val p0 = stack.pop(); try p0.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () } }
+        try {
+          current.close.handleError(_ => Task.unit).sync()
+        } catch {
+          case _: Throwable => ()
+        }
+        while (!stack.isEmpty) {
+          val p0 = stack.pop()
+          try {
+            p0.close.handleError(_ => Task.unit).sync()
+          } catch {
+            case _: Throwable => ()
+          }
+        }
         builder.result()
       }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
@@ -805,8 +1003,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             case Step.Concat(inner) => stack.push(current); current = inner
           }
         }
-        try { current.close.handleError(_ => Task.unit).sync() } catch { case _: Throwable => () }
-        while (!stack.isEmpty) { val p0 = stack.pop(); try p0.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () } }
+        try {
+          current.close.handleError(_ => Task.unit).sync()
+        } catch {
+          case _: Throwable => ()
+        }
+        while (!stack.isEmpty) {
+          val p0 = stack.pop()
+          try {
+            p0.close.handleError(_ => Task.unit).sync()
+          } catch {
+            case _: Throwable => ()
+          }
+        }
         builder.result()
       }.guarantee(pullR.close.handleError(_ => Task.unit))
     }
@@ -831,8 +1040,19 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
           case Step.Concat(inner) => stack.push(current); current = inner
         }
       }
-      try { current.close.handleError(_ => Task.unit).sync() } catch { case _: Throwable => () }
-      while (!stack.isEmpty) { val p0 = stack.pop(); try p0.close.handleError(_ => Task.unit).sync() catch { case _: Throwable => () } }
+      try {
+        current.close.handleError(_ => Task.unit).sync()
+      } catch {
+        case _: Throwable => ()
+      }
+      while (!stack.isEmpty) {
+        val p0 = stack.pop()
+        try {
+          p0.close.handleError(_ => Task.unit).sync()
+        } catch {
+          case _: Throwable => ()
+        }
+      }
       cnt
     }.guarantee(pullR.close.handleError(_ => Task.unit))
   }
@@ -860,7 +1080,7 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * the first encountered exception is propagated after all workers shut down and future tasks are skipped.
    *
    * @param threads the number of concurrent workers to use
-   * @param forge the effectful function to apply to each element
+   * @param forge   the effectful function to apply to each element
    * @tparam R the supertype of the stream's element type
    * @return a `Task[Unit]` that completes when all elements are processed, or fails on the first error
    */
@@ -874,15 +1094,21 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       def recurse(current: Pull[R], stack: java.util.ArrayDeque[Pull[R]]): Unit = {
         if (throwable.isEmpty) {
           current.pull.sync() match {
-            case Step.Emit(r) =>
-              forge(r).handleError { t =>
+            case e: Step.Emit[_] =>
+              forge(e.value).handleError { t =>
                 throwable = Some(t)
                 Task.unit
               }.sync()
               recurse(current, stack)
-            case Step.Skip => recurse(current, stack)
-            case Step.Stop => if (!stack.isEmpty) recurse(stack.pop(), stack)
-            case Step.Concat(inner) => stack.push(current); recurse(inner, stack)
+            case Step.Skip =>
+              recurse(current, stack)
+            case Step.Stop =>
+              if (!stack.isEmpty) {
+                recurse(stack.pop(), stack)
+              }
+            case c: Step.Concat[_] =>
+              stack.push(current)
+              recurse(c.pull, stack)
           }
         }
       }
@@ -951,25 +1177,31 @@ object Stream {
 
         // Build a pull that forwards steps and ensures release at termination/error
         val base = Pull.fromFunction[Step[A]](() => Step.Skip) // placeholder, we'll transform below
-        val pull = base.transform { _ => Task {
-          val (r, p) = state.get() match {
-            case Some((r0, p0)) => (r0, p0)
-            case None =>
-              val r0 = acquire.sync()
-              val p0 = use(r0).task.sync()
-              state.set(Some((r0, p0)))
-              (r0, p0)
-          }
-          try {
-            val n = p.pull.sync()
-            n match {
-              case Step.Stop => ensureRelease(r); Step.Stop
-              case other => other
+        val pull = base.transform { _ =>
+          Task {
+            val (r, p) = state.get() match {
+              case Some((r0, p0)) => (r0, p0)
+              case None =>
+                val r0 = acquire.sync()
+                val p0 = use(r0).task.sync()
+                state.set(Some((r0, p0)))
+                (r0, p0)
             }
-          } catch {
-            case t: Throwable => ensureRelease(r); throw t
+            try {
+              val n = p.pull.sync()
+              n match {
+                case Step.Stop =>
+                  ensureRelease(r)
+                  Step.Stop
+                case other => other
+              }
+            } catch {
+              case t: Throwable =>
+                ensureRelease(r)
+                throw t
+            }
           }
-        }}
+        }
         pull
       }
     )
@@ -1033,10 +1265,13 @@ object Stream {
         val innerQueue = new java.util.concurrent.ConcurrentLinkedQueue[() => Pull[Return]]()
         Pull.fromFunction[Return]({ () =>
           val thunk = innerQueue.poll()
-          if (thunk != null) Step.Concat(thunk())
-          else {
+          if (thunk != null) {
+            Step.Concat(thunk())
+          } else {
             outerPull.pull.sync() match {
-              case Step.Emit(stream) => innerQueue.offer(() => stream.task.sync()); Step.Skip
+              case Step.Emit(stream) =>
+                innerQueue.offer(() => stream.task.sync())
+                Step.Skip
               case Step.Skip => Step.Skip
               case Step.Concat(inner) => Step.Concat(inner.asInstanceOf[Pull[Return]])
               case Step.Stop =>
@@ -1074,7 +1309,7 @@ object Stream {
   /**
    * Creates a Byte stream from the InputStream task
    *
-   * @param input the InputStream task
+   * @param input      the InputStream task
    * @param bufferSize the buffer size internally to use for the InputStream. Defaults to 1024.
    * @return a new stream that emits Bytes
    */
@@ -1087,11 +1322,24 @@ object Stream {
 
       Pull.fromFunction[Byte]({ () =>
         lock.synchronized {
-          if (pos >= len) { len = is.read(buf); pos = 0 }
-          if (len < 0) Step.Stop
-          else { val b = buf(pos); pos += 1; Step.Emit(b) }
+          if (pos >= len) {
+            len = is.read(buf)
+            pos = 0
+          }
+          if (len < 0) {
+            Step.Stop
+          } else {
+            val b = buf(pos)
+            pos += 1
+            Step.Emit(b)
+          }
         }
-      }, Task { try is.close() catch { case _: Throwable => () } })
+      }, Task {
+        try is.close()
+        catch {
+          case _: Throwable => ()
+        }
+      })
     })
 
   def task[Return](stream: Stream[Return]): Task[Pull[Return]] = stream.task
