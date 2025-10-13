@@ -36,22 +36,22 @@ Take a look at the benchmarks to see how well it performs compared to the altern
 
 ### Core
 ```scala
-libraryDependencies += "com.outr" %% "rapid-core" % "1.1.0"
+libraryDependencies += "com.outr" %% "rapid-core" % "2.0.0"
 ```
 
 ### Scribe (Effects for Logging)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-scribe" % "1.1.0"
+libraryDependencies += "com.outr" %% "rapid-scribe" % "2.0.0"
 ```
 
 ### Test (Test features for running Task effects in ScalaTest)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-test" % "1.1.0"
+libraryDependencies += "com.outr" %% "rapid-test" % "2.0.0"
 ```
 
 ### Cats (Interoperability with Cats-Effect)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-cats" % "1.1.0"
+libraryDependencies += "com.outr" %% "rapid-cats" % "2.0.0"
 ```
 
 ---
@@ -69,18 +69,21 @@ import scala.concurrent.duration._
 val hello: Task[Unit] = Task {
   println("Hello, Rapid!")
 }
-// hello: Task[Unit] = SingleTask(
-//   f = repl.MdocSession$MdocApp$$Lambda/0x00007f3bb44c8400@126f490b
+// hello: Task[Unit] = Suspend(
+//   f = repl.MdocSession$MdocApp$$Lambda/0x000000001651c5b0@66b6a90a,
+//   trace = rapid.trace.Trace$empty$@6e01b508
 // )
 
 val delayed: Task[String] =
   Task.sleep(500.millis).map(_ => "Done!")
-// delayed: Task[String] = FlatMapTask(
-//   source = FlatMapTask(
-//     source = Unit,
-//     forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f3bb44d08c8@139d463f)
+// delayed: Task[String] = FlatMap(
+//   input = FlatMap(
+//     input = Unit,
+//     f = rapid.Task$$Lambda/0x0000000016524000@7f14e741,
+//     trace = rapid.trace.Trace$empty$@6e01b508
 //   ),
-//   forge = FunctionForge(f = rapid.Task$$Lambda/0x00007f3bb44d1ee8@25fdf81c)
+//   f = rapid.Task$$Lambda/0x0000000016525118@27c6a567,
+//   trace = rapid.trace.Trace$empty$@6e01b508
 // )
 
 hello.sync()
@@ -102,7 +105,12 @@ val fiber = Task {
   Thread.sleep(1000)
   "Completed!"
 }.start()
-// fiber: Fiber[String] = Fiber(VirtualThreadFiber)
+// fiber: Fiber[String] = FixedThreadPoolFiber(
+//   task = Suspend(
+//     f = repl.MdocSession$MdocApp$$Lambda/0x0000000016528678@1611a8e2,
+//     trace = rapid.trace.Trace$empty$@6e01b508
+//   )
+// )
 
 println("Running in background...")
 // Running in background...
@@ -122,7 +130,7 @@ You can transform it sequentially or in parallel.
 import rapid.{Stream, Task}
 
 val s = Stream.emits(1 to 5)
-// s: Stream[Int] = rapid.Stream@72edd057
+// s: Stream[Int] = rapid.Stream@8201f381
 
 val doubled = s.map(_ * 2).toList.sync()
 // doubled: List[Int] = List(2, 4, 6, 8, 10)
@@ -212,7 +220,7 @@ streamResult // 5050
 import rapid.{Stream, ParallelStream, Task}
 
 val base = Stream.emits(1 to 10)
-// base: Stream[Int] = rapid.Stream@4e6c1c80
+// base: Stream[Int] = rapid.Stream@305df041
 val ps   = ParallelStream(
   stream = base,
   forge  = (i: Int) => Task.pure(if (i % 2 == 0) Some(i * 10) else None),
@@ -220,8 +228,8 @@ val ps   = ParallelStream(
   maxBuffer  = 100000
 )
 // ps: ParallelStream[Int, Int] = ParallelStream(
-//   stream = rapid.Stream@4e6c1c80,
-//   forge = repl.MdocSession$MdocApp$$anon$25@1e0c90fc,
+//   stream = rapid.Stream@305df041,
+//   forge = repl.MdocSession$MdocApp$$anon$25@141f12e2,
 //   maxThreads = 8,
 //   maxBuffer = 100000
 // )
@@ -247,8 +255,9 @@ val t = Task {
   if (System.currentTimeMillis() % 2L == 0L) "ok"
   else throw new RuntimeException("boom")
 }
-// t: Task[String] = SingleTask(
-//   f = repl.MdocSession$MdocApp$$Lambda/0x00007f3bb44e7bf0@772e911a
+// t: Task[String] = Suspend(
+//   f = repl.MdocSession$MdocApp$$Lambda/0x000000001653efc0@68181ec8,
+//   trace = rapid.trace.Trace$empty$@6e01b508
 // )
 
 t.attempt.sync() match {
