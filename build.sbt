@@ -51,7 +51,7 @@ ThisBuild / Test / parallelExecution := false
 
 ThisBuild / Test / logBuffered := false
 
-val sourcecodeVersion: String = "0.4.2"
+val sourcecodeVersion: String = "0.4.4"
 
 val scribeVersion: String = "3.17.0"
 
