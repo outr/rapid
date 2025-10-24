@@ -1,6 +1,6 @@
 package rapid
 
-import rapid.fiber.{FixedThreadPoolFiber, SynchronousFiber}
+import rapid.fiber._
 import rapid.task._
 import rapid.trace.Trace
 import sourcecode.{Enclosing, File, Line}
@@ -21,8 +21,11 @@ trait Task[+Return] {
   protected def trace: Trace
 
   protected def exec(mode: ExecutionMode): Fiber[Return] = mode match {
-    case ExecutionMode.Synchronous => SynchronousFiber(this)
-    case ExecutionMode.Asynchronous => FixedThreadPoolFiber(this)
+    case ExecutionMode.Synchronous =>
+      SynchronousFiber(this)
+    case ExecutionMode.Asynchronous =>
+      FixedThreadPoolFiber(this)
+//    case ExecutionMode.Asynchronous => VirtualThreadFiber(this)
   }
 
   /**
@@ -354,14 +357,18 @@ trait Task[+Return] {
   /**
    * Starts the task and returns a `Fiber` representing the running task.
    */
-  final def start: Task[Fiber[Return]] = Suspend(() => exec(ExecutionMode.Asynchronous), Trace.empty)
+  final def start: Task[Fiber[Return]] = Suspend(() => {
+    exec(ExecutionMode.Asynchronous)
+  }, Trace.empty)
 
   /**
    * Specialized fire-and-forget start that avoids Fiber/latch. Optimized for simple Suspend tasks.
    */
-  final def startUnit(): Unit = this match {
-    case Suspend(f, _) => rapid.fiber.FixedThreadPoolFiber.execute(new Runnable { override def run(): Unit = f(); })
-    case _ => rapid.fiber.FixedThreadPoolFiber.execute(new Runnable { override def run(): Unit = try SynchronousFiber(Task.this).sync() catch { case _: Throwable => () } })
+  final def startUnit(): Unit = {
+    // Schedule asynchronous interpreter without waiting on the result
+    rapid.fiber.FixedThreadPoolFiber.execute(new Runnable {
+      override def run(): Unit = try { new rapid.fiber.FixedThreadPoolFiber(Task.this); () } catch { case _: Throwable => () }
+    })
   }
 
   /**
@@ -370,9 +377,7 @@ trait Task[+Return] {
    */
   final def runAsync(): Unit = {
     rapid.fiber.FixedThreadPoolFiber.execute(new Runnable {
-      override def run(): Unit = {
-        try rapid.fiber.SynchronousFiber(Task.this).sync() catch { case _: Throwable => () }
-      }
+      override def run(): Unit = rapid.fiber.SynchronousFiber(Task.this).sync()
     })
   }
 
@@ -403,30 +408,87 @@ trait Task[+Return] {
    * CPU. For larger sequences it's recommended to use Stream.par instead.
    */
   def parSequence[T: ClassTag, C[_]](tasks: C[Task[T]])
-                                    (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
-                                     asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
+                                   (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
+                                    asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
     val completable = Task.completable[C[T]]
-    val total = asIterable(tasks).size
+    val taskSeq = asIterable(tasks).toIndexedSeq
+    val total = taskSeq.size
     if (total == 0) {
       completable.success(bf.newBuilder(tasks).result())
     } else {
-      val array = new Array[T](total)
-      val completed = new AtomicInteger(0)
+      val results = new Array[T](total)
+      val doneCount = new java.util.concurrent.atomic.AtomicInteger(0)
+      val completed = new java.util.concurrent.atomic.AtomicBoolean(false)
 
-      def add(r: T, index: Int): Unit = {
-        array(index) = r
-        val finished = completed.incrementAndGet()
-        if (finished == total) {
-          completable.success(bf.newBuilder(tasks).addAll(array).result())
+      var index = 0
+      val n = total
+      while (index < n) {
+        val idx = index
+        taskSeq(idx)
+          .map { r =>
+            results(idx) = r
+            if (doneCount.incrementAndGet() == total && completed.compareAndSet(false, true)) {
+              completable.success(bf.newBuilder(tasks).addAll(results).result())
+            }
+          }
+          .handleError { t =>
+            if (completed.compareAndSet(false, true)) completable.failure(t)
+            Task.unit
+          }
+          .startUnit()
+        index += 1
+      }
+    }
+    completable
+  }
+
+  /**
+   * Parallel sequence with bounded concurrency. Schedules at most `parallelism` tasks at a time,
+   * starting a new task as each finishes until all tasks are complete.
+   */
+  def parSequenceBounded[T: ClassTag, C[_]](tasks: C[Task[T]], parallelism: Int)
+                                          (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
+                                           asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
+    val par = math.max(1, parallelism)
+    val completable = Task.completable[C[T]]
+    val taskSeq = asIterable(tasks).toIndexedSeq
+    val total = taskSeq.size
+    if (total == 0) {
+      completable.success(bf.newBuilder(tasks).result())
+    } else {
+      val results = new Array[T](total)
+      val doneCount = new java.util.concurrent.atomic.AtomicInteger(0)
+      val completed = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val index = new java.util.concurrent.atomic.AtomicInteger(0)
+
+      def runWorker(): Unit = {
+        val i = index.getAndIncrement()
+        if (i >= total) {
+          ()
+        } else {
+          taskSeq(i)
+            .map { r =>
+              results(i) = r
+            }
+            .handleError { t =>
+              if (completed.compareAndSet(false, true)) completable.failure(t)
+              Task.unit
+            }
+            .map { _ =>
+              val doneNow = doneCount.incrementAndGet()
+              if (doneNow == total && completed.compareAndSet(false, true)) {
+                completable.success(bf.newBuilder(tasks).addAll(results).result())
+              } else {
+                runWorker()
+              }
+            }
+            .startUnit()
         }
       }
 
-      asIterable(tasks).zipWithIndex.foreach {
-        case (task, index) => task.map { r =>
-          array(index) = r
-          add(r, index)
-        }.start()
-      }
+      val workers = math.min(par, total)
+      var w = 0
+      while (w < workers) { runWorker(); w += 1 }
     }
     completable
   }

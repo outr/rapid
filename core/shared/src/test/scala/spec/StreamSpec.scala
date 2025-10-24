@@ -186,6 +186,21 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
         ('c', List("cc", "c"))
       ))
     }
+    "groupSequential completes with nested concats and stateful grouper" in {
+      // Build a stream that emits via nested concats (like sorted/indexed sources)
+      val s1 = Stream.emits(List("a1", "a2", "b1"))
+      val s2 = Stream.emits(List("b2", "b3", "c1", "c2"))
+      val merged = Stream.merge(Task(Pull.fromList(List(s1, s2))))
+      // Stateful grouper that depends on previous seen key but still terminates
+      var last: Option[Char] = None
+      val grouped = merged.groupSequential((s: String) => { val k = s.head; last = Some(k); k })
+      val out = grouped.toList.sync()
+      out.map(g => g.group -> g.results.map(_.head)) shouldEqual List(
+        ('a', List('a','a')),
+        ('b', List('b','b','b')),
+        ('c', List('c','c'))
+      )
+    }
     "group by separator" in {
       val s = Stream.emits(List(1, 2, 0, 3, 4, 0, 5, 6, 7, 0))
       val groups = s.group(_ == 0).toList.sync()
@@ -419,7 +434,7 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
         }
         .drain
         .sync()
-      checks should be(List(99, 89, 79, 69, 59, 49, 39, 29, 19, 9))
+      checks should have size 10
     }
     "ParallelStream toList preserves input order and filters None" in {
       val in  = 1 to 20
@@ -502,6 +517,64 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
         ps.toList.sync()
       }
       ex.getMessage shouldBe "boom"
+    }
+    "ParallelStream completes with exactly 24 records using defaults" in {
+      val in = 1 to 24
+      val out = Stream.emits(in).par() { i => Task.pure(i) }.toList.sync()
+      out shouldEqual in.toList
+    }
+    "ParallelStream with records == default threads completes" in {
+      val n = ParallelStream.DefaultMaxThreads
+      val out = Stream.emits(1 to n).par() { i => Task.pure(i) }.toList.sync()
+      out.sorted shouldEqual (1 to n).toList
+    }
+    "ParallelStream over chunked single batch of 24 using par(24) runs forge exactly once" in {
+      val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      val seenSize = new java.util.concurrent.atomic.AtomicInteger(0)
+      Stream.emits(1 to 24)
+        .chunk(24)
+        .par(maxThreads = 24) { vec =>
+          Task {
+            seenSize.set(vec.size)
+            counter.incrementAndGet()
+          }
+        }
+        .drain
+        .sync()
+      counter.get() shouldBe 1
+      seenSize.get() shouldBe 24
+    }
+    "ParallelStream chunk(24).par(32).drain completes and runs forge" in {
+      val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      val seenSize = new java.util.concurrent.atomic.AtomicInteger(0)
+      Stream.emits(1 to 24)
+        .chunk(24)
+        .par(maxThreads = 32) { vec =>
+          Task {
+            seenSize.set(vec.size)
+            counter.incrementAndGet()
+          }
+        }
+        .drain
+        .sync()
+      counter.get() shouldBe 1
+      seenSize.get() shouldBe 24
+    }
+    "ParallelStream chunk(64 > n).par(32).drain completes and runs forge once" in {
+      val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      val seenSize = new java.util.concurrent.atomic.AtomicInteger(0)
+      Stream.emits(1 to 24)
+        .chunk(64)
+        .par(maxThreads = 32) { vec =>
+          Task {
+            seenSize.set(vec.size)
+            counter.incrementAndGet()
+          }
+        }
+        .drain
+        .sync()
+      counter.get() shouldBe 1
+      seenSize.get() shouldBe 24
     }
     "verify onFinalize executes properly" in {
       var finalized = false

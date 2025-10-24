@@ -7,7 +7,7 @@ trait Trace {
 }
 
 object Trace {
-  @volatile var Enabled: Boolean = false
+  @volatile var Enabled: Boolean = true
 
   object empty extends Trace {
     override def toSTE: Option[StackTraceElement] = None

@@ -285,55 +285,57 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @param grouper the grouping function
    * @tparam G the group key
    */
-  def groupSequential[G, R >: Return](grouper: R => G): Stream[Grouped[G, R]] =
-    new Stream(task.map { pullR =>
+  def groupSequential[G, R >: Return](grouper: R => G): Stream[Grouped[G, R]] = {
+    Stream(task.map { pullR =>
       val buf = scala.collection.mutable.ListBuffer.empty[R]
       var curKey: Option[G] = None
-      var pendingFlush: Option[Grouped[G, R]] = None
-      Pull.fromFunction[Grouped[G, R]]({ () =>
-        if (pendingFlush.nonEmpty) {
-          val out = pendingFlush.get
-          pendingFlush = None
-          Step.Emit(out)
-        } else {
-          @annotation.tailrec
-          def loop(): Step[Grouped[G, R]] = pullR.pull.sync() match {
-            case Step.Emit(r) =>
-              val k = grouper(r)
-              curKey match {
-                case None =>
-                  curKey = Some(k)
-                  buf += r
-                  loop()
-                case Some(ck) if ck == k =>
-                  buf += r
-                  loop()
-                case Some(ck) =>
-                  val out = Grouped(ck, buf.toList)
-                  buf.clear()
-                  curKey = Some(k)
-                  buf += r
-                  Step.Emit(out)
-              }
-            case Step.Skip => loop()
-            case Step.Concat(inner) =>
-              // push inner in front of current by returning concat
-              Step.Concat(inner.transform(_ => Task.pure(Step.Skip))).asInstanceOf[Step[Grouped[G, R]]]
-            case Step.Stop =>
-              curKey match {
-                case Some(ck) if buf.nonEmpty =>
-                  val out = Grouped(ck, buf.toList)
-                  buf.clear()
-                  curKey = None
-                  Step.Emit(out)
-                case _ => Step.Stop
-              }
-          }
+      var flushed = false
 
-          loop()
+      // Inner transform: handle elements and concat traversal only. Do NOT flush on Stop here.
+      lazy val mapStep: Task[Step[Return]] => Task[Step[Grouped[G, R]]] = { st =>
+        st.map {
+          case Step.Emit(e) =>
+            val r = e.asInstanceOf[R]
+            val k = grouper(r)
+            curKey match {
+              case None =>
+                curKey = Some(k)
+                buf += r
+                Step.Skip
+              case Some(ck) if ck == k =>
+                buf += r
+                Step.Skip
+              case Some(ck) =>
+                val out = Grouped(ck, buf.toList)
+                buf.clear()
+                curKey = Some(k)
+                buf += r
+                Step.Emit(out)
+            }
+          case Step.Skip => Step.Skip
+          case Step.Stop => Step.Stop
+          case Step.Concat(inner) => Step.Concat(inner.transform(mapStep))
         }
-      }, pullR.close)
+      }
+
+      val base = pullR.transform(mapStep)
+      // Outer transform: perform a single final flush when the ROOT pull stops.
+      base.transform { st =>
+        st.map {
+          case Step.Stop if curKey.nonEmpty && buf.nonEmpty && !flushed =>
+            flushed = true
+            val out = Grouped(curKey.get, buf.toList)
+            buf.clear()
+            curKey = None
+            Step.Emit(out)
+          case s @ Step.Stop => s
+          case e @ Step.Emit(_) => e
+          case s @ Step.Skip => s
+          case c @ Step.Concat(_) => c
+        }
+      }
     })
+  }
 
   /**
    * Groups at a separator
@@ -824,11 +826,15 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
         var acc = initial
         var done = false
         while (!done) {
-          current.pull.sync() match {
-            case Step.Emit(r) => acc = f(acc, r).sync()
+          val step = current.pull.sync()
+          step match {
+            case Step.Emit(r) =>
+              acc = f(acc, r).sync()
             case Step.Skip => ()
-            case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) => stack.push(current); current = inner
+            case Step.Stop =>
+              if (stack.isEmpty) done = true else current = stack.pop()
+            case Step.Concat(inner) =>
+              stack.push(current); current = inner
           }
         }
         // Close all pulls
@@ -963,11 +969,13 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
         var current: Pull[Return] = pullR
         var done = false
         while (!done) {
-          current.pull.sync() match {
+          val step = current.pull.sync()
+          step match {
             case Step.Emit(r) => builder += r
             case Step.Skip => ()
             case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) => stack.push(current); current = inner
+            case Step.Concat(inner) =>
+              stack.push(current); current = inner
           }
         }
         try {
@@ -1059,12 +1067,16 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
 
   def par[T, R >: Return](maxThreads: Int = ParallelStream.DefaultMaxThreads,
                           maxBuffer: Int = ParallelStream.DefaultMaxBuffer)
-                         (forge: Forge[R, T]): ParallelStream[R, T] = ParallelStream(
-    stream = this,
-    forge = forge.map(Option.apply),
-    maxThreads = maxThreads,
-    maxBuffer = maxBuffer
-  )
+                         (forge: Forge[R, T]): ParallelStream[R, T] = {
+    val threads = if (maxThreads <= 0) 1 else maxThreads
+    val buffer  = if (maxBuffer <= 0) 1 else maxBuffer
+    ParallelStream(
+      stream = this,
+      forge = forge.map(Option.apply),
+      maxThreads = threads,
+      maxBuffer = buffer
+    )
+  }
 
   /**
    * Executes the stream in parallel using a fixed number of threads, applying the given [[Forge]]
@@ -1116,7 +1128,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       recurse(pull.asInstanceOf[Pull[R]], new java.util.ArrayDeque[Pull[R]]())
     }
 
-    val tasks = (0 until threads).toList.map { _ => puller }
+    val safeThreads = if (threads <= 0) 1 else threads
+    val tasks = (0 until safeThreads).toList.map { _ => puller }
 
     tasks.tasksPar.map { _ =>
       throwable.foreach(throw _)
@@ -1273,10 +1286,15 @@ object Stream {
                 innerQueue.offer(() => stream.task.sync())
                 Step.Skip
               case Step.Skip => Step.Skip
-              case Step.Concat(inner) => Step.Concat(inner.asInstanceOf[Pull[Return]])
+              case Step.Concat(inner) =>
+                Step.Concat(inner.asInstanceOf[Pull[Return]])
               case Step.Stop =>
                 val t2 = innerQueue.poll()
-                if (t2 == null) Step.Stop else Step.Concat(t2())
+                if (t2 == null) {
+                  Step.Stop
+                } else {
+                  Step.Concat(t2())
+                }
             }
           }
         }, outerPull.close)

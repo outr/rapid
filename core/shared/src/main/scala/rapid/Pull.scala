@@ -11,7 +11,9 @@ case class Pull[+Return](pull: Task[Step[Return]], close: Task[Unit] = Task.unit
 
 object Pull {
   def fromFunction[T](pullF: () => Step[T], close: Task[Unit] = Task.unit): Pull[T] =
-    Pull(Task(pullF()), close)
+    Pull(Task {
+      pullF()
+    }, close)
   def fromList[T](list: List[T]): Pull[T] = {
     val state = new AtomicReference[List[T]](list)
     val pull = Task {
@@ -40,7 +42,12 @@ object Pull {
     val len = seq.length
     val pull = Task {
       val i = idx.getAndIncrement()
-      if (i < len) Step.Emit(seq(i)) else Step.Stop
+      if (i < len) {
+        val v = seq(i)
+        Step.Emit(v)
+      } else {
+        Step.Stop
+      }
     }
     Pull(pull)
   }
@@ -55,7 +62,18 @@ object Pull {
     val lock = new AnyRef
     val pull = Task {
       lock.synchronized {
-        if (iter.hasNext) Step.Emit(iter.next()) else Step.Stop
+        try {
+          if (iter.hasNext) {
+            val v = iter.next()
+            Step.Emit(v)
+          } else {
+            Step.Stop
+          }
+        } catch {
+          case _: java.util.concurrent.RejectedExecutionException =>
+            // Underlying iterator's executor was closed; treat as end-of-stream
+            Step.Stop
+        }
       }
     }
     Pull(pull)
