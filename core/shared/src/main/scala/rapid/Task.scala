@@ -337,6 +337,7 @@ trait Task[+Return] {
   def guarantee(task: => Task[Unit]): Task[Return] = attempt
     .flatTap { _ =>
       task
+        .handleError(_ => Task.unit)    // Ignore errors on guarantee
     }
     .map(_.get)
 

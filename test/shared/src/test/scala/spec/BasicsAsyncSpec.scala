@@ -155,5 +155,27 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       completable.success("Test")
       text should be("Test")
     }
+    "run Task.and in parallel and return results" in {
+      val left = Task.sleep(10.millis).map(_ => 1)
+      val right = Task.sleep(10.millis).map(_ => 2)
+      val both = left.and(right)
+      both.map { case (l, r) =>
+        l should be(1)
+        r should be(2)
+      }
+    }
+    "preserve original failure when guarantee finalizer fails" in {
+      val mainEx = new RuntimeException("main boom")
+      val finEx = new RuntimeException("finalizer boom")
+      val t = Task.error[String](mainEx).guarantee(Task { throw finEx })
+      t.attempt.map {
+        case scala.util.Success(_) => fail("expected failure")
+        case scala.util.Failure(e) => e should be (mainEx)
+      }
+    }
+    "flatMap from UnitTask into Unit function should not cast Some to Unit" in {
+      val t = Task.unit.flatMap { _ => Task.pure(1) }
+      t.map { v => v should be (1) }
+    }
   }
 }
