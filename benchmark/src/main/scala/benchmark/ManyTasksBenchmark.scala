@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
 import rapid.Task
+import rapid.trace.Trace
 import zio.{Runtime, Unsafe, ZIO}
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -57,6 +58,7 @@ class ManyTasksBenchmark {
 
   @Benchmark
   def rapidBenchmark(): Unit = {
+    Trace.Enabled = false
     val latch = new CountDownLatch(tasks)
     var i = 0
     while (i < tasks) {

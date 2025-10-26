@@ -10,7 +10,7 @@ import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, Sch
 case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
   // Minimal completion mechanics with lazy latch to avoid per-fiber allocation when not awaited
   @volatile private var completed: Boolean = false
-  @volatile private var failure: Throwable = null
+  @volatile private var failure: Throwable = _
   private var result: Any = _
   private var done: CountDownLatch = _
 
@@ -55,7 +55,7 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
           def handle(value: Any): Unit = value match {
             case t: Task[_] =>
               t match {
-                case _: UnitTask => ()
+                case _: UnitTask => previous = ()
                 case t: Taskable[_] => handle(t.toTask)
                 case Pure(r) => previous = r
                 case Suspend(f, tr) =>
@@ -77,6 +77,7 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
                   } else {
                     FixedThreadPoolFiber.scheduler.schedule(resumeRunnable, ms, TimeUnit.MILLISECONDS)
                   }
+                  previous = ()
                 case c: Completable[_] =>
                   if (tracing) {
                     lastTrace = c.trace

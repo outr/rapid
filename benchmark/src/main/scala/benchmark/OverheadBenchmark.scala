@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
 import rapid.Task
+import rapid.trace.Trace
 import zio.{Runtime, Unsafe, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -47,6 +48,7 @@ class OverheadBenchmark {
 
   @Benchmark
   def rapidBenchmark(): Unit = {
+    Trace.Enabled = false
     val task = (1 to iterations).foldLeft(Task(0))((t, i) => t.flatMap { total =>
       Task(total + simpleComputation)
     })

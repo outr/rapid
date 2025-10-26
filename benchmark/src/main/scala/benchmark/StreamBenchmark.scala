@@ -6,6 +6,7 @@ import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
 import rapid.Task
 import rapid.cats._
+import rapid.trace.Trace
 
 import scala.concurrent.duration._
 import java.util.concurrent.TimeUnit
@@ -23,6 +24,7 @@ class StreamBenchmark {
 
   @Setup(Level.Trial)
   def setup(): Unit = {
+    Trace.Enabled = false
     rapidStream
     fs2Stream
   }

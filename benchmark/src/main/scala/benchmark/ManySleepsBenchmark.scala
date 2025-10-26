@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations.{Benchmark, BenchmarkMode, Mode, OutputTimeUnit, Scope, State}
 import rapid.Task
+import rapid.trace.Trace
 import zio.{Duration, Runtime, Unsafe, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -49,6 +50,7 @@ class ManySleepsBenchmark {
 
   @Benchmark
   def rapidBenchmark(): Unit = {
+    Trace.Enabled = false
     val completed = new AtomicInteger(0)
     (1 to tasks).foreach { _ =>
       Task.sleep(sleepTime).map(_ => completed.incrementAndGet()).start()

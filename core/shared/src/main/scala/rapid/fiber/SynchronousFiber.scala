@@ -34,7 +34,8 @@ case class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
         def handle(value: Any): Unit = value match {
           case task: Task[_] =>
             task match {
-              case _: UnitTask => // Ignore
+              case _: UnitTask =>
+                previous = ()
               case t: Taskable[_] => handle(t.toTask)
               case Pure(value) =>
                 previous = value
@@ -50,6 +51,7 @@ case class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
                   record(tr)
                 }
                 Thread.sleep(duration.toMillis)
+                previous = ()
               case c: Completable[_] =>
                 if (tracing) {
                   lastTrace = c.trace

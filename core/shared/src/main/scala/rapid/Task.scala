@@ -45,7 +45,7 @@ trait Task[+Return] {
    * @tparam T the type of the result produced by the task
    * @return a new task that defers the execution of the given task
    */
-  def defer[T](task: => Task[T]): Task[T] = flatMap(_ => task)
+  def defer[T](task: => Task[T])(implicit file: File, line: Line, enclosing: Enclosing): Task[T] = flatMap(_ => task)
 
   /**
    * Transforms the result of this task to the result of the supplied function ignoring the previous result.
@@ -178,7 +178,8 @@ trait Task[+Return] {
    * but if false, it will immediately return upon execution doing nothing. The return is Some(r) if the condition is
    * met and None if the condition is false.
    */
-  def when(condition: => Boolean): Task[Option[Return]] = Task.defer {
+  def when(condition: => Boolean)
+          (implicit file: File, line: Line, enclosing: Enclosing): Task[Option[Return]] = Task.defer {
     if (condition) {
       this.map(Some.apply)
     } else {
@@ -190,7 +191,8 @@ trait Task[+Return] {
    * Convenience conditional execution of the Task. If the condition is true, the task will execute the instruction set,
    * but if false, it will return upon execution returning "default".
    */
-  def when[R >: Return](condition: => Boolean, default: => R): Task[R] = when(condition)
+  def when[R >: Return](condition: => Boolean, default: => R)
+                       (implicit file: File, line: Line, enclosing: Enclosing): Task[R] = when(condition)
     .map {
       case Some(r) => r
       case None => default
@@ -208,7 +210,7 @@ trait Task[+Return] {
    *
    * @return a new task that returns `Unit` after the existing task completes
    */
-  def unit: Task[Unit] = map(_ => ())
+  def unit(implicit file: File, line: Line, enclosing: Enclosing): Task[Unit] = map(_ => ())
 
   /**
    * Effect to get the current time in milliseconds
@@ -304,7 +306,7 @@ trait Task[+Return] {
    *
    * @return either the result of the task or an exception
    */
-  def attempt: Task[Try[Return]] = Task {
+  def attempt(implicit file: File, line: Line, enclosing: Enclosing): Task[Try[Return]] = Task {
     Try(sync())
   }
 
@@ -323,7 +325,7 @@ trait Task[+Return] {
    * @param f handler
    * @return Task[R]
    */
-  def handleError[R >: Return](f: Throwable => Task[R]): Task[R] = attempt
+  def handleError[R >: Return](f: Throwable => Task[R])(implicit file: File, line: Line, enclosing: Enclosing): Task[R] = attempt
     .flatMap {
       case Success(r) => Task.pure(r)
       case Failure(t) => f(t)
@@ -334,7 +336,7 @@ trait Task[+Return] {
    *
    * @param task the task to guarantee invocation of
    */
-  def guarantee(task: => Task[Unit]): Task[Return] = attempt
+  def guarantee(task: => Task[Unit])(implicit file: File, line: Line, enclosing: Enclosing): Task[Return] = attempt
     .flatTap { _ =>
       task
         .handleError(_ => Task.unit)    // Ignore errors on guarantee
@@ -394,7 +396,7 @@ trait Task[+Return] {
    */
   def sequence[T, C[_]](tasks: C[Task[T]])
                        (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
-                        asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
+                        asIterable: C[Task[T]] => Iterable[Task[T]], file: File, line: Line, enclosing: Enclosing): Task[C[T]] = flatMap { _ =>
     val empty = bf.newBuilder(tasks)
     Task {
       asIterable(tasks).foldLeft(empty) {
@@ -410,7 +412,8 @@ trait Task[+Return] {
    */
   def parSequence[T: ClassTag, C[_]](tasks: C[Task[T]])
                                    (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
-                                    asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
+                                    asIterable: C[Task[T]] => Iterable[Task[T]],
+                                    file: File, line: Line, enclosing: Enclosing): Task[C[T]] = flatMap { _ =>
     val completable = Task.completable[C[T]]
     val taskSeq = asIterable(tasks).toIndexedSeq
     val total = taskSeq.size
@@ -449,7 +452,8 @@ trait Task[+Return] {
    */
   def parSequenceBounded[T: ClassTag, C[_]](tasks: C[Task[T]], parallelism: Int)
                                           (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
-                                           asIterable: C[Task[T]] => Iterable[Task[T]]): Task[C[T]] = flatMap { _ =>
+                                           asIterable: C[Task[T]] => Iterable[Task[T]],
+                                           file: File, line: Line, enclosing: Enclosing): Task[C[T]] = flatMap { _ =>
     val par = math.max(1, parallelism)
     val completable = Task.completable[C[T]]
     val taskSeq = asIterable(tasks).toIndexedSeq
