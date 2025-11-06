@@ -177,5 +177,24 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       val t = Task.unit.flatMap { _ => Task.pure(1) }
       t.map { v => v should be (1) }
     }
+    "start and wait for four tasks to complete" in {
+      val start = System.currentTimeMillis()
+      val task = for {
+        f1 <- Task.sleep(500.millis).start
+        f2 <- Task.sleep(500.millis).start
+        f3 <- Task.sleep(500.millis).start
+        f4 <- Task.sleep(500.millis).start
+        _ <- f1
+        _ <- f2
+        _ <- f3
+        _ <- f4
+      } yield ()
+      task.function {
+        val now = System.currentTimeMillis()
+        val elapsed = now - start
+        elapsed should be >= 500L
+        elapsed should be <= 1_000L
+      }
+    }
   }
 }

@@ -1317,6 +1317,15 @@ object Stream {
   })
 
   /**
+   * Convenience functionality to list the contents of a directory Path, but applies a sort to the listing.
+   */
+  def listDirectory[B](directory: Path, sortBy: Path => B)
+                      (implicit ordering: Ordering[B]): Stream[Path] = rapid.Stream.force(Task {
+    val list = Files.list(directory).iterator().asScala.toList.sortBy(sortBy)(ordering)
+    rapid.Stream.emits(list)
+  })
+
+  /**
    * Creates a Byte stream from the Java File
    *
    * @param file the file to load

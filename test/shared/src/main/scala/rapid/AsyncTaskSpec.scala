@@ -19,7 +19,9 @@ trait AsyncTaskSpec {
     val runnable = new Runnable {
       override def run(): Unit = {
         try p.trySuccess(task.sync())
-        catch { case th: Throwable => p.tryFailure(th) }
+        catch {
+          case th: Throwable => p.tryFailure(th)
+        }
       }
     }
     val t = new Thread(runnable, "rapid-test-sync")
@@ -28,10 +30,16 @@ trait AsyncTaskSpec {
 
     // Fails the promise if it takes too long
     val timer = new java.util.Timer(true)
-    val timerTask = new java.util.TimerTask { override def run(): Unit = p.tryFailure(new java.util.concurrent.TimeoutException("Async test timed out")) }
+    val timerTask = new java.util.TimerTask {
+      override def run(): Unit = p.tryFailure(new java.util.concurrent.TimeoutException("Async test timed out"))
+    }
     timer.schedule(timerTask, testTimeout.toMillis)
 
-    p.future.andThen { case _ => timerTask.cancel(); timer.cancel() }(ec)
+    p.future.andThen {
+      case _ =>
+        timerTask.cancel()
+        timer.cancel()
+    }(ec)
   }
 
   implicit class TaskTestExtras[Return](task: Task[Return]) {
