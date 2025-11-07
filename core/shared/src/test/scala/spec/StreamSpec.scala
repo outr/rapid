@@ -8,7 +8,7 @@ import rapid._
 
 import java.io.File
 import java.nio.file.Files
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import scala.concurrent.duration.DurationInt
 
 class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
@@ -435,6 +435,22 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
         .drain
         .sync()
       checks should have size 10
+    }
+    "verify par doesn't exceed the thread count" in {
+      val counter = new AtomicInteger(0)
+      val stream = Stream.emits(0 to 100)
+        .par(maxThreads = 4) { i =>
+          Task.sleep(100.millis).function {
+            counter.incrementAndGet()
+          }
+        }
+      stream.drain.start()
+      Task.sleep(105.millis).function {
+        counter.get() should be(4)
+      }.sync()
+      Task.sleep(105.millis).function {
+        counter.get() should be(8)
+      }.sync()
     }
     "ParallelStream toList preserves input order and filters None" in {
       val in  = 1 to 20
