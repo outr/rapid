@@ -1312,7 +1312,7 @@ object Stream {
   /**
    * Convenience functionality to list the contents of a directory Path.
    */
-  def listDirectory(directory: Path): Stream[Path] = listDirectory(directory, _.getFileName.toString)
+  def listDirectory(directory: Path): Stream[Path] = listDirectory(directory, NaturalKey.of)
 
   /**
    * Convenience functionality to list the contents of a directory Path, but applies a sort to the listing.
