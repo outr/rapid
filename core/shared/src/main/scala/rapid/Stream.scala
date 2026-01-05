@@ -1219,6 +1219,89 @@ object Stream {
       }
     )
 
+  /**
+   * Safely unfold a Stream-of-Streams without building recursive `append` / `Concat` chains.
+   *
+   * Why:
+   * - `Stream.append` switches streams by returning `Step.Concat(nextPull)`.
+   * - The Stream interpreter keeps prior pulls on a stack until the whole stream completes.
+   * - For paginated sources where each page holds a large in-memory buffer, recursive `append` can retain
+   *   every prior page and OOM.
+   *
+   * This helper iterates pages in a single Pull:
+   * - fetch page N
+   * - drain it
+   * - close it
+   * - fetch page N+1
+   */
+  def unfoldStreamEval[S, A](seed: S)(next: S => Task[Option[(Stream[A], S)]]): Stream[A] = Stream(
+    Task.defer {
+      val lock = new AnyRef
+
+      var state: S = seed
+      var currentPull: Pull[A] = Pull.fromList(Nil)
+      var currentPullInitialized: Boolean = false
+      var done: Boolean = false
+
+      def closeCurrentPull(): Unit = {
+        currentPull.close.attempt.sync()
+      }
+
+      def fetchNextPull(): Unit = {
+        // Close the previous pull before fetching the next to release references promptly.
+        closeCurrentPull()
+        next(state).sync() match {
+          case None =>
+            done = true
+            currentPull = Pull.fromList(Nil)
+          case Some((stream, nextState)) =>
+            state = nextState
+            currentPull = Stream.task(stream).sync()
+        }
+        currentPullInitialized = true
+      }
+
+      val pullTask: Task[Step[A]] = Task {
+        lock.synchronized {
+          @annotation.tailrec
+          def loop(): Step[A] = {
+            if (done) {
+              Step.Stop
+            } else {
+              if (!currentPullInitialized) {
+                fetchNextPull()
+              }
+
+              currentPull.pull.sync() match {
+                case e @ Step.Emit(_) => e
+                case Step.Skip => loop()
+                case Step.Concat(inner) =>
+                  // Allow inner concats within a page's pull.
+                  currentPull = inner
+                  loop()
+                case Step.Stop =>
+                  // Page drained. Fetch the next page.
+                  currentPullInitialized = false
+                  loop()
+              }
+            }
+          }
+
+          loop()
+        }
+      }
+
+      val closeTask: Task[Unit] = Task {
+        lock.synchronized {
+          done = true
+          closeCurrentPull()
+        }
+      }
+
+      Task.pure(Pull(pullTask, closeTask))
+    }
+  )
+
   /** Managed-from-iterator with explicit release hook (always runs on termination/error). */
   def fromIteratorManaged[A](mk: Task[Iterator[A]])(release: Iterator[A] => Task[Unit]): Stream[A] = {
     using(mk) { it =>

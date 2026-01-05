@@ -108,6 +108,27 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val result = stream1.append(stream2).toList.sync()
       result shouldEqual List(1, 2, 3, 4, 5, 6)
     }
+    "unfoldStreamEval closes each page before fetching the next" in {
+      val closed = new AtomicInteger(0)
+      val pages = 10
+
+      def mkPage(i: Int): Stream[Int] = {
+        val base = Pull.fromList(List(i))
+        val pull = Pull(base.pull, Task { closed.incrementAndGet(); () })
+        Stream(Task.pure(pull))
+      }
+
+      val s = Stream.unfoldStreamEval(0) { i =>
+        Task {
+          // At the time we are asked to produce page i, all previous pages must already be closed.
+          closed.get() shouldEqual i
+          if (i >= pages) None else Some(mkPage(i) -> (i + 1))
+        }
+      }
+
+      s.toList.sync() shouldEqual (0 until pages).toList
+      closed.get() shouldEqual pages
+    }
     "handle empty streams correctly" in {
       val emptyStream = Stream.empty[Int]
       val result = emptyStream.toList.sync()

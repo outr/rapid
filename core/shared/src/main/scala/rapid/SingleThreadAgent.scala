@@ -4,15 +4,21 @@ import java.util.concurrent._
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
-final class SingleThreadAgent[Resource] private (name: String, create: Task[Resource]) {
+final class SingleThreadAgent[Resource] private (name: String,
+                                                 create: Task[Resource],
+                                                 preferVirtualThread: Boolean) {
   private val closed       = new AtomicBoolean(false)
   private val ownerThread  = new AtomicReference[Thread](null)
 
-  // Use a platform thread for true OS-thread affinity (recommended for JNI)
   private val exec: ExecutorService = Executors.newSingleThreadExecutor(new ThreadFactory {
     override def newThread(r: Runnable): Thread = {
-      val t = new Thread(r, s"$name-sta") // UNSTARTED; executor will start it
-      t.setDaemon(true)
+      val t = if (preferVirtualThread) {
+        Thread.ofVirtual().name(s"$name-sta").factory().newThread(r)
+      } else {
+        val pt = new Thread(r, s"$name-sta")
+        pt.setDaemon(true)
+        pt
+      }
       ownerThread.compareAndSet(null, t)
       t
     }
@@ -59,6 +65,19 @@ final class SingleThreadAgent[Resource] private (name: String, create: Task[Reso
 }
 
 object SingleThreadAgent {
+  /**
+   * Creates a SingleThreadAgent backed by a **platform thread**.
+   *
+   * Prefer this for JNI / thread-confined native resources (ex: RocksDB iterators).
+   */
   def apply[Resource](name: String)(create: Task[Resource]): SingleThreadAgent[Resource] =
-    new SingleThreadAgent(name, create)
+    new SingleThreadAgent(name, create, preferVirtualThread = false)
+
+  /**
+   * Creates a SingleThreadAgent backed by a **virtual thread**.
+   *
+   * Note: Virtual threads are NOT guaranteed OS-thread-affine, so don't use this for JNI thread confinement.
+   */
+  def virtual[Resource](name: String)(create: Task[Resource]): SingleThreadAgent[Resource] =
+    new SingleThreadAgent(name, create, preferVirtualThread = true)
 }

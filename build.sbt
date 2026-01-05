@@ -80,7 +80,15 @@ lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
     libraryDependencies ++= Seq(
       "com.lihaoyi" %%% "sourcecode" % sourcecodeVersion,
       "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
-    )
+    ),
+    Compile / unmanagedSourceDirectories ++= {
+      val major = if (scalaVersion.value.startsWith("3")) "-3" else "-2"
+      List(CrossType.Pure, CrossType.Full).flatMap(
+        _.sharedSrcDir(baseDirectory.value, "main").toList.map { f =>
+          file(f.getPath + major)
+        }
+      )
+    }
   )
 //  .jsSettings(
 //    libraryDependencies ++= Seq(
