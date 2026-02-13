@@ -458,20 +458,23 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       checks should have size 10
     }
     "verify par doesn't exceed the thread count" in {
-      val counter = new AtomicInteger(0)
-      val stream = Stream.emits(0 to 100)
-        .par(maxThreads = 4) { i =>
-          Task.sleep(100.millis).function {
-            counter.incrementAndGet()
-          }
-        }
-      stream.drain.start()
-      Task.sleep(105.millis).function {
-        counter.get() should be(4)
-      }.sync()
-      Task.sleep(105.millis).function {
-        counter.get() should be(8)
-      }.sync()
+      val active = new AtomicInteger(0)
+      val maxActive = new AtomicInteger(0)
+
+      def updateMax(v: Int): Unit =
+        maxActive.getAndUpdate(m => Math.max(m, v))
+
+      val s = Stream.emits(0 to 100).par(maxThreads = 4) { _ =>
+        Task {
+          val now = active.incrementAndGet()
+          updateMax(now)
+        }.flatMap { _ =>
+          Task.sleep(100.millis)
+        }.guarantee(Task(active.decrementAndGet()))
+      }
+
+      s.drain.sync()
+      maxActive.get() should be <= 4
     }
     "ParallelStream toList preserves input order and filters None" in {
       val in  = 1 to 20
