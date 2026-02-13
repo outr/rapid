@@ -1393,21 +1393,48 @@ object Stream {
   def fromPath(path: Path): Stream[Byte] = fromFile(path.toFile)
 
   /**
-   * Convenience functionality to list the contents of a directory Path.
+   * Convenience functionality to list the contents of a directory Path. This is extremely fast and efficient, but does
+   * not guarantee sort order.
    */
-  def listDirectory(directory: Path): Stream[Path] = listDirectory(directory, NaturalKey.of)
+  def listDirectory(directory: Path): Stream[Path] = Stream.force(Task {
+    val ds = Files.newDirectoryStream(directory)
+    val closed = new AtomicBoolean(false)
+
+    def closeOnce(): Unit = if (closed.compareAndSet(false, true)) ds.close()
+
+    val baseIt = ds.iterator().asScala
+
+    val it: Iterator[Path] = new Iterator[Path] {
+      override def hasNext: Boolean = {
+        val hn = baseIt.hasNext
+        if (!hn) closeOnce()
+        hn
+      }
+
+      override def next(): Path = baseIt.next()
+    }
+
+    Stream
+      .fromIterator(Task.pure(it))
+      .onFinalize(Task(closeOnce()))
+  })
 
   /**
    * Convenience functionality to list the contents of a directory Path, but applies a sort to the listing.
+   *
+   * Use NaturalKey.of for a reliable sort that detects full numbers and blocks.
+   *
+   * NOTE: This actually loads the entire list into memory to sort it. Prefer the unsorted variation if loading giant
+   * lists of files.
    */
   def listDirectory[B](directory: Path, sortBy: Path => B)
                       (implicit ordering: Ordering[B]): Stream[Path] = rapid.Stream.force(Task {
-    val stream = Files.list(directory)
+    val ds = Files.newDirectoryStream(directory)
     try {
-      val list = stream.iterator().asScala.toList.sortBy(sortBy)(ordering)
-      rapid.Stream.emits(list)
+      val list = ds.iterator().asScala.toList.sortBy(sortBy)(ordering)
+      Stream.emits(list)
     } finally {
-      stream.close()
+      ds.close()
     }
   })
 

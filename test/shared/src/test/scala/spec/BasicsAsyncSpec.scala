@@ -196,5 +196,13 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
         elapsed should be <= 1_000L
       }
     }
+    "verify chunk + fold" in {
+      rapid.Stream.emits(0 to 100)
+        .chunk(chunkSize = 10)
+        .fold(0)((total, values) => Task.pure(total + values.sum))
+        .map { total =>
+          total should be(5050)
+        }
+    }
   }
 }
