@@ -21,11 +21,9 @@ trait Task[+Return] {
   protected def trace: Trace
 
   protected def exec(mode: ExecutionMode): Fiber[Return] = mode match {
-    case ExecutionMode.Synchronous =>
-      SynchronousFiber(this)
-    case ExecutionMode.Asynchronous =>
-      FixedThreadPoolFiber(this)
-//    case ExecutionMode.Asynchronous => VirtualThreadFiber(this)
+    case ExecutionMode.Synchronous => SynchronousFiber(this)
+    case ExecutionMode.Asynchronous if Task.Virtual => VirtualThreadFiber(this)
+    case ExecutionMode.Asynchronous => FixedThreadPoolFiber(this)
   }
 
   /**
@@ -500,6 +498,13 @@ trait Task[+Return] {
 }
 
 object Task extends UnitTask {
+  /**
+   * If enabled, uses virtual threads. If disabled, uses classic thread-pools.
+   *
+   * Defaults to true
+   */
+  var Virtual: Boolean = true
+
   override def pure[T](value: T): Task[T] = Pure(value)
 
   def apply[T](f: => T)(implicit file: File, line: Line, enclosing: Enclosing): Task[T] =
