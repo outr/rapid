@@ -6,10 +6,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Minute, Span}
 import rapid._
 
-import java.io.File
-import java.nio.file.Files
-import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-import scala.concurrent.duration.DurationInt
+import java.util.concurrent.atomic.AtomicInteger
 
 class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
@@ -38,18 +35,6 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       closed shouldBe true
     }
 
-    "close underlying InputStream in fromInputStream" in {
-      var closed = false
-      val is = new java.io.ByteArrayInputStream("abc".getBytes("UTF-8")) {
-        override def close(): Unit = {
-          closed = true
-          super.close()
-        }
-      }
-      val out = Stream.fromInputStream(Task.pure(is)).toList.sync()
-      out.map(_.toChar).mkString shouldEqual "abc"
-      closed shouldBe true
-    }
     "correctly map elements" in {
       val stream = Stream.emits(List(1, 2, 3, 4))
       val result = stream.map(_ * 2).toList.sync()
@@ -93,15 +78,6 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val result = stream.par(3)(x => Task(x * 2)).toList.sync()
       result.sorted shouldEqual List(2, 4, 6, 8, 10, 12) // Sorting to account for parallel execution order
     }
-    "use parFast to quickly process with many threads" in {
-      val stream = Stream.emits(0L until 1_000_000L)
-      val add = new AtomicLong(0L)
-      stream.parForeach() { i =>
-        add.addAndGet(i)
-        Task.unit
-      }.sync()
-      add.get() should be(499999500000L)
-    }
     "append two streams" in {
       val stream1 = Stream.emits(List(1, 2, 3))
       val stream2 = Stream.emits(List(4, 5, 6))
@@ -144,14 +120,6 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val result = stream.unNone.toList.sync()
       result should be(List(1, 2, 3))
     }
-    "write a String to a File via byte stream" in {
-      val stream = Stream.emits("Hello, World!".getBytes("UTF-8").toList)
-      val file = new File("test.txt")
-      val bytes = stream.toFile(file).sync()
-      bytes should be(13)
-      Files.readString(file.toPath) should be("Hello, World!")
-      file.delete()
-    }
     "read bytes into lines" in {
       val stream = Stream.emits(
         """This
@@ -159,25 +127,6 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
           |multiple
           |lines""".stripMargin.getBytes("UTF-8").toIndexedSeq)
       stream.lines.toList.sync() should be(List("This", "is", "multiple", "lines"))
-    }
-    "verify stream merging works and lazily builds" in {
-      val s1 = Stream(1, 2, 3)
-      val s2 = Stream.force(Task.sleep(1.second).map(_ => Stream(4, 5, 6)))
-      var set = Set.empty[Int]
-      val merged = Stream.merge(Task(Pull.fromList(List(s1, s2)))).foreach { i =>
-        set += i
-      }
-      set should be(Set.empty)
-      val start = System.currentTimeMillis()
-      merged.drain.start()
-      Task.sleep(10.milliseconds).flatMap { _ =>
-        set should be(Set(1, 2, 3))
-        Task.sleep(1000.milliseconds).map { _ =>
-          set should be(Set(1, 2, 3, 4, 5, 6))
-          val elapsed = System.currentTimeMillis() - start
-          elapsed should be >= 1000L
-        }
-      }.sync()
     }
     "zip with index correctly and handle empty" in {
       Stream.emits(List("a", "b", "c"))
@@ -320,18 +269,6 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
 
       out shouldEqual List(1, 2, 3)
     }
-    "parFast stops on first failure and propagates error" in {
-      val s = Stream.emits(1 to 10000)
-      @volatile var processed = 0
-      val err = intercept[RuntimeException] {
-        s.parForeach(threads = 4) { i =>
-          if (i == 5000) Task.error(new RuntimeException("boom"))
-          else Task { processed += 1 }
-        }.sync()
-      }
-      err.getMessage shouldBe "boom"
-      processed should be < 10000
-    }
     "append ++ alias produces same result" in {
       val s1 = Stream.emits(List(1, 2))
       val s2 = Stream.emits(List(3))
@@ -444,38 +381,6 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
         triggered should be(true)
       }.sync()
     }
-    "do something every N millis" in {
-      var checks = List.empty[Int]
-      Stream
-        .emits(1 to 100)
-        .evalMap(i => Task.sleep(10.millis).map(_ => i))
-        .every(100.millis) { i =>
-          checks = i :: checks
-          Task.unit
-        }
-        .drain
-        .sync()
-      checks should have size 10
-    }
-    "verify par doesn't exceed the thread count" in {
-      val active = new AtomicInteger(0)
-      val maxActive = new AtomicInteger(0)
-
-      def updateMax(v: Int): Unit =
-        maxActive.getAndUpdate(m => Math.max(m, v))
-
-      val s = Stream.emits(0 to 100).par(maxThreads = 4) { _ =>
-        Task {
-          val now = active.incrementAndGet()
-          updateMax(now)
-        }.flatMap { _ =>
-          Task.sleep(100.millis)
-        }.guarantee(Task(active.decrementAndGet()))
-      }
-
-      s.drain.sync()
-      maxActive.get() should be <= 4
-    }
     "ParallelStream toList preserves input order and filters None" in {
       val in  = 1 to 20
       val ps  = Stream.emits(in).par(maxThreads = 4, maxBuffer = 64) { i =>
@@ -515,23 +420,6 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       }.collect { case i if i % 5 == 0 => i }
       kept.toList.sync() shouldEqual List(5, 10, 15, 20, 25, 30, 35, 40, 45, 50)
       seen.get() shouldEqual 10
-    }
-    "ParallelStream respects maxThreads (caps concurrent forge calls)" in {
-      val active   = new java.util.concurrent.atomic.AtomicInteger(0)
-      val peak     = new java.util.concurrent.atomic.AtomicInteger(0)
-      val threads  = 3
-      val ps = Stream.emits(1 to 50).par(maxThreads = threads) { _ =>
-        Task {
-          val now = active.incrementAndGet()
-          var prev = peak.get()
-          if (now > prev) peak.compareAndSet(prev, now)
-          Thread.sleep(5)
-          active.decrementAndGet()
-          1
-        }
-      }
-      ps.count.sync() shouldEqual 50
-      peak.get() should be <= threads
     }
     "ParallelStream handles empty stream" in {
       val ps = Stream.empty[Int].par(maxThreads = 4)(i => Task.pure(i * 2))

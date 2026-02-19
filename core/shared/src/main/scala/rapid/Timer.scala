@@ -1,6 +1,5 @@
 package rapid
 
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.immutable.VectorMap
 
@@ -12,7 +11,7 @@ class Timer private(val name: Option[String]) {
   private[rapid] val _elapsed = new AtomicLong(0L)
 
   def elapsedNanos: Long = _elapsed.get()
-  def elapsedMillis: Long = TimeUnit.NANOSECONDS.toMillis(elapsedNanos)
+  def elapsedMillis: Long = elapsedNanos / 1_000_000
   def elapsedSeconds: Double = elapsedMillis / 1000.0
 
   def effect[Return](f: => Return): Return = {

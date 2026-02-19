@@ -66,4 +66,3 @@ class SwingTaskMonitor extends StatsTaskMonitor {
   // Start the updater thread
   startUpdater()
 }
-

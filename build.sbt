@@ -17,7 +17,7 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "2.5.0"
+ThisBuild / version := "2.6.0-SNAPSHOT"
 ThisBuild / scalaVersion := scala3
 ThisBuild / crossScalaVersions := allScalaVersions
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
@@ -44,7 +44,7 @@ ThisBuild / outputStrategy := Some(StdoutOutput)
 
 ThisBuild / Test / testOptions += Tests.Argument("-oDF")
 
-ThisBuild / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "30", "30")
+// -W (watchdog) is only supported on JVM ScalaTest, not JS/Native
 
 ThisBuild / Test / parallelExecution := false
 
@@ -64,15 +64,7 @@ val scalaJsMacrotaskVersion: String = "1.1.1"
 
 val scalaTestVersion: String = "3.2.19"
 
-lazy val root = project.in(file("."))
-  .aggregate(core.jvm, scribe.jvm, test.jvm, cats.jvm)
-  .settings(
-    name := projectName,
-    publish := {},
-    publishLocal := {}
-  )
-
-lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
+lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Full)
   .settings(
     name := s"$projectName-core",
@@ -89,11 +81,20 @@ lazy val core = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
       )
     }
   )
-//  .jsSettings(
-//    libraryDependencies ++= Seq(
-//      "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion,
-//    )
-//  )
+  .jvmSettings(
+    Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "30", "30"),
+    Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "jvmNative" / "src" / "test" / "scala"
+  )
+  .jsSettings(
+    libraryDependencies ++= Seq(
+      "org.scala-js" %%% "scala-js-macrotask-executor" % scalaJsMacrotaskVersion
+    )
+  )
+  .nativeSettings(
+    Compile / nativeConfig ~= { _.withLTO(scala.scalanative.build.LTO.thin) },
+    Test / nativeConfig ~= { _.withLTO(scala.scalanative.build.LTO.none) },
+    Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "jvmNative" / "src" / "test" / "scala"
+  )
 
 lazy val scribe = crossProject(JVMPlatform)
   .crossType(CrossType.Full)
@@ -106,7 +107,7 @@ lazy val scribe = crossProject(JVMPlatform)
     )
   )
 
-lazy val test = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
+lazy val test = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Full)
   .dependsOn(core)
   .settings(
@@ -114,6 +115,9 @@ lazy val test = crossProject(JVMPlatform) //, JSPlatform, NativePlatform)
     libraryDependencies ++= Seq(
       "org.scalatest" %%% "scalatest" % scalaTestVersion
     )
+  )
+  .jvmSettings(
+    Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "30", "30")
   )
 
 lazy val cats = crossProject(JVMPlatform) //, JSPlatform)
@@ -151,4 +155,12 @@ lazy val docs = project
       "VERSION" -> version.value
     ),
     mdocOut := file(".")
+  )
+
+lazy val root = project.in(file("."))
+  .aggregate(core.jvm, core.js, core.native, scribe.jvm, test.jvm, test.js, test.native, cats.jvm)
+  .settings(
+    name := projectName,
+    publish := {},
+    publishLocal := {}
   )

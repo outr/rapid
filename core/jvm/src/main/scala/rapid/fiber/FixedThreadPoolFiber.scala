@@ -1,30 +1,43 @@
 package rapid.fiber
 
-import rapid.task.{Completable, FlatMap, Pure, Sleep, Suspend, Taskable, UnitTask}
+import rapid.task.{Completable, FlatMap, HandleError, Pure, Sleep, Suspend, Taskable, UnitTask}
 import rapid.trace.Trace
 import rapid.{Fiber, Task}
 
 import java.util
 import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, ScheduledExecutorService, ThreadFactory, ThreadPoolExecutor, TimeUnit}
+import scala.util.{Failure, Success, Try}
 
-case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
-  // Minimal completion mechanics with lazy latch to avoid per-fiber allocation when not awaited
+class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
   @volatile private var completed: Boolean = false
   @volatile private var failure: Throwable = _
   private var result: Any = _
   private var done: CountDownLatch = _
+  private var completionCallbacks: List[Try[Return] => Unit] = Nil
 
-  private def completeSuccess(v: Any): Unit = {
+  private def completeSuccess(v: Any): Unit = this.synchronized {
     result = v
     completed = true
     val l = done
     if (l ne null) l.countDown()
+    val cbs = completionCallbacks
+    completionCallbacks = Nil
+    cbs.foreach { cb =>
+      try cb(Success(v.asInstanceOf[Return]))
+      catch { case _: Throwable => () }
+    }
   }
-  private def completeFailure(t: Throwable): Unit = {
+  private def completeFailure(t: Throwable): Unit = this.synchronized {
     failure = t
     completed = true
     val l = done
     if (l ne null) l.countDown()
+    val cbs = completionCallbacks
+    completionCallbacks = Nil
+    cbs.foreach { cb =>
+      try cb(Failure(t))
+      catch { case _: Throwable => () }
+    }
   }
 
   private final class Interpreter(root: Task[Return]) extends Runnable {
@@ -47,6 +60,18 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
     }
 
     stack.push(root)
+
+    private def findAndApplyErrorHandler(t: Throwable): Boolean = {
+      while (!stack.isEmpty) {
+        stack.pop() match {
+          case ErrorHandlerMarker(handler, _) =>
+            stack.push(handler(t))
+            return true
+          case _ =>
+        }
+      }
+      false
+    }
 
     private def stepLoop(scheduleOnYield: Boolean): Unit = {
       try {
@@ -88,13 +113,26 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
                     case scala.util.Success(v) =>
                       previous = v
                       resumeRunnable.run()
-                    case scala.util.Failure(t) => completeFailure(t)
+                    case scala.util.Failure(t) =>
+                      if (findAndApplyErrorHandler(t)) {
+                        resumeRunnable.run()
+                      } else {
+                        completeFailure(t)
+                      }
                   }
+                case HandleError(inner, handler, tr) =>
+                  if (tracing) {
+                    lastTrace = tr
+                    record(tr)
+                  }
+                  stack.push(ErrorHandlerMarker(handler.asInstanceOf[Throwable => Task[Any]], tr))
+                  stack.push(inner)
                 case FlatMap(input, f, tr) =>
-                  // When tracing, push (f, tr) so we can record on application
                   if (tracing) stack.push((f, tr)) else stack.push(f)
                   stack.push(input)
               }
+            case _: ErrorHandlerMarker =>
+              ()
             case f: Function1[_, _] =>
               val next = f.asInstanceOf[Any => Task[Any]](previous)
               stack.push(next)
@@ -111,12 +149,15 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
         if (continue && stack.isEmpty) completeSuccess(previous)
       } catch {
         case t: Throwable =>
-          if (tracing) {
+          val error = if (tracing) {
             val n = Math.min(traceIdx, TraceBufSize)
             val frames = List.tabulate(n)(i => traceBuf((traceIdx - 1 - i) & (TraceBufSize - 1))).filter(_ != Trace.empty).distinct
-            completeFailure(Trace.update(t, frames))
+            Trace.update(t, frames)
+          } else t
+          if (findAndApplyErrorHandler(error)) {
+            stepLoop(scheduleOnYield)
           } else {
-            completeFailure(t)
+            completeFailure(error)
           }
       }
     }
@@ -142,6 +183,25 @@ case class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return
     val f = failure
     if (f ne null) throw f
     result.asInstanceOf[Return]
+  }
+
+  override def join: Task[Return] = {
+    val c = Task.completable[Return]
+    onComplete {
+      case Success(v) => c.success(v)
+      case Failure(t) => c.failure(t)
+    }
+    c
+  }
+
+  override def onComplete(f: Try[Return] => Unit): Unit = this.synchronized {
+    if (completed) {
+      val fail = failure
+      if (fail ne null) f(Failure(fail))
+      else f(Success(result.asInstanceOf[Return]))
+    } else {
+      completionCallbacks = f :: completionCallbacks
+    }
   }
 }
 
@@ -178,4 +238,8 @@ object FixedThreadPoolFiber {
 
   /** Public entry to schedule a runnable onto the fiber executor. */
   def execute(runnable: Runnable): Unit = executor.execute(runnable)
+
+  /** ExecutionContext view of the fiber executor for use by Platform. */
+  def executionContext: scala.concurrent.ExecutionContext =
+    scala.concurrent.ExecutionContext.fromExecutor(executor)
 }

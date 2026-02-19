@@ -7,7 +7,7 @@ final case class SourcecodeTrace(file: File, line: Line, enclosing: Enclosing) e
     val cls = enclosing.value
     val fileN = {
       val p = file.value
-      val i = p.lastIndexOf(java.io.File.separatorChar)
+      val i = math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
       if (i >= 0) p.substring(i + 1) else p
     }
     Some(new StackTraceElement(cls, "<task>", fileN, line.value))

@@ -1,7 +1,7 @@
 package rapid
 
 import rapid.fiber._
-import rapid.task._
+import rapid.task.{Completable, FlatMap, HandleError, Pure, Sleep, Suspend, UnitTask}
 import rapid.trace.Trace
 import sourcecode.{Enclosing, File, Line}
 
@@ -22,8 +22,7 @@ trait Task[+Return] {
 
   protected def exec(mode: ExecutionMode): Fiber[Return] = mode match {
     case ExecutionMode.Synchronous => SynchronousFiber(this)
-    case ExecutionMode.Asynchronous if Task.Virtual => VirtualThreadFiber(this)
-    case ExecutionMode.Asynchronous => FixedThreadPoolFiber(this)
+    case ExecutionMode.Asynchronous => Platform.createFiber(this)
   }
 
   /**
@@ -123,13 +122,16 @@ trait Task[+Return] {
    *
    * @param that the second task to execute
    */
-  def and[T](that: Task[T]): Task[(Return, T)] = Task {
-    val f1 = this.start()
-    val f2 = that.start()
-    val r1 = f1.sync()
-    val r2 = f2.sync()
-    (r1, r2)
-  }
+  def and[T](that: Task[T]): Task[(Return, T)] =
+    this.start.flatMap { f1 =>
+      that.start.flatMap { f2 =>
+        f1.join.flatMap { r1 =>
+          f2.join.map { r2 =>
+            (r1, r2)
+          }
+        }
+      }
+    }
 
   /**
    * Makes this Task execute exactly once. Any future calls to this Task will return the result of the first execution.
@@ -138,22 +140,20 @@ trait Task[+Return] {
     val triggered = new AtomicBoolean(false)
     val completable = Task.completable[Return]
 
-    Task {
+    Task.defer {
       val active = triggered.compareAndSet(false, true)
       if (active) {
-        // Execute the task directly without creating a fiber to avoid hanging
-        try {
-          val result = this.sync()
-          completable.success(result)
-          result
-        } catch {
-          case e: Throwable =>
-            completable.failure(e)
-            throw e
+        this.flatMap { result =>
+          Task {
+            completable.success(result)
+            result
+          }
+        }.handleError { e =>
+          completable.failure(e)
+          Task.error(e)
         }
       } else {
-        // Wait for the completable to be completed by the first execution
-        completable.sync()
+        completable
       }
     }
   }
@@ -304,8 +304,13 @@ trait Task[+Return] {
    *
    * @return either the result of the task or an exception
    */
-  def attempt(implicit file: File, line: Line, enclosing: Enclosing): Task[Try[Return]] = Task {
-    Try(sync())
+  def attempt(implicit file: File, line: Line, enclosing: Enclosing): Task[Try[Return]] = {
+    val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
+    HandleError[Try[Return]](
+      this.map(v => Success(v): Try[Return]),
+      t => Pure(Failure(t)),
+      tr
+    )
   }
 
   /**
@@ -323,11 +328,10 @@ trait Task[+Return] {
    * @param f handler
    * @return Task[R]
    */
-  def handleError[R >: Return](f: Throwable => Task[R])(implicit file: File, line: Line, enclosing: Enclosing): Task[R] = attempt
-    .flatMap {
-      case Success(r) => Task.pure(r)
-      case Failure(t) => f(t)
-    }
+  def handleError[R >: Return](f: Throwable => Task[R])(implicit file: File, line: Line, enclosing: Enclosing): Task[R] = {
+    val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
+    HandleError(this, f, tr)
+  }
 
   /**
    * Guarantees execution even if there's an exception at a higher level
@@ -366,10 +370,7 @@ trait Task[+Return] {
    * Specialized fire-and-forget start that avoids Fiber/latch. Optimized for simple Suspend tasks.
    */
   final def startUnit(): Unit = {
-    // Schedule asynchronous interpreter without waiting on the result
-    rapid.fiber.FixedThreadPoolFiber.execute(new Runnable {
-      override def run(): Unit = try { new rapid.fiber.FixedThreadPoolFiber(Task.this); () } catch { case _: Throwable => () }
-    })
+    Platform.runAsync(this)
   }
 
   /**
@@ -377,16 +378,18 @@ trait Task[+Return] {
    * Useful in benchmarks or cases where you only need completion side-effects.
    */
   final def runAsync(): Unit = {
-    rapid.fiber.FixedThreadPoolFiber.execute(new Runnable {
-      override def run(): Unit = rapid.fiber.SynchronousFiber(Task.this).sync()
-    })
+    Platform.runAsync(this)
   }
 
   /**
    * Provides convenience functionality to execute this Task as a scala.concurrent.Future.
    */
-  def toFuture(implicit ec: scala.concurrent.ExecutionContext): scala.concurrent.Future[Return] =
-    scala.concurrent.Future(this.sync())
+  def toFuture(implicit ec: scala.concurrent.ExecutionContext): scala.concurrent.Future[Return] = {
+    val p = scala.concurrent.Promise[Return]()
+    val fiber = exec(ExecutionMode.Asynchronous)
+    fiber.onComplete(r => p.complete(r))
+    p.future
+  }
 
   /**
    * Converts a sequence of Task[Return] to a Task that returns a sequence of Return. Generally cleaner usage via the
@@ -395,12 +398,10 @@ trait Task[+Return] {
   def sequence[T, C[_]](tasks: C[Task[T]])
                        (implicit bf: BuildFrom[C[Task[T]], T, C[T]],
                         asIterable: C[Task[T]] => Iterable[Task[T]], file: File, line: Line, enclosing: Enclosing): Task[C[T]] = flatMap { _ =>
-    val empty = bf.newBuilder(tasks)
-    Task {
-      asIterable(tasks).foldLeft(empty) {
-        case (builder, task) => builder.addOne(task.sync())
-      }.result()
-    }
+    val taskList = asIterable(tasks).toList
+    taskList.foldLeft(Task.pure(bf.newBuilder(tasks))) { (accTask, t) =>
+      accTask.flatMap(builder => t.map(v => builder.addOne(v)))
+    }.map(_.result())
   }
 
   /**

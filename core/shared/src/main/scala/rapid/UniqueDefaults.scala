@@ -1,7 +1,5 @@
 package rapid
 
-import java.util.concurrent.ThreadLocalRandom
-
 object UniqueDefaults {
   lazy val LettersLower = "abcdefghijklmnopqrstuvwxyz"
   lazy val LettersUpper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -12,28 +10,12 @@ object UniqueDefaults {
   lazy val AllLetters = s"$LettersLower$LettersUpper"
   lazy val AllLettersAndNumbers = s"$LettersLower$LettersUpper$Numbers"
 
-  /**
-   * Random number generator used to generate unique values. Defaults to `threadLocalRandom`.
-   */
-  var random: Forge[Int, Int] = threadLocalRandom
+  /** Random number generator; uses platform default (e.g. ThreadLocalRandom on JVM). */
+  def random: Forge[Int, Int] = Platform.defaultRandom
 
-  /**
-   * The default length to use for generating unique values. Defaults to 32.
-   */
-  var length: Int = 32
+  /** Default length for unique values. Defaults to 32. */
+  def length: Int = 32
 
-  /**
-   * The default characters to use for generating unique values. Defaults to AllLettersAndNumbers.
-   */
-  var characters: String = AllLettersAndNumbers
-
-  /**
-   * Uses java.util.concurrent.ThreadLocalRandom to generate random numbers.
-   *
-   * @param max the maximum value to include
-   * @return random number between 0 and max
-   */
-  final lazy val threadLocalRandom: Forge[Int, Int] = Forge { max =>
-    Task(ThreadLocalRandom.current().nextInt(max))
-  }
+  /** Default characters for unique values. Defaults to AllLettersAndNumbers. */
+  def characters: String = AllLettersAndNumbers
 }

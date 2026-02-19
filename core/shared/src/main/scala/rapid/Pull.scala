@@ -62,17 +62,11 @@ object Pull {
     val lock = new AnyRef
     val pull = Task {
       lock.synchronized {
-        try {
-          if (iter.hasNext) {
-            val v = iter.next()
-            Step.Emit(v)
-          } else {
-            Step.Stop
-          }
-        } catch {
-          case _: java.util.concurrent.RejectedExecutionException =>
-            // Underlying iterator's executor was closed; treat as end-of-stream
-            Step.Stop
+        if (iter.hasNext) {
+          val v = iter.next()
+          Step.Emit(v)
+        } else {
+          Step.Stop
         }
       }
     }
