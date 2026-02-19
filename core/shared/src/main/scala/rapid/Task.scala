@@ -61,7 +61,7 @@ trait Task[+Return] {
    * @return a new task with the transformed result
    */
   def map[T](f: Return => T)(implicit file: File, line: Line, enclosing: Enclosing): Task[T] = {
-    val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
+    val tr = if (Trace.Enabled) Trace(file, line, enclosing, "map") else Trace.empty
     if (Trace.Enabled) {
       // Preserve per-step traces by building as FlatMap → Suspend
       FlatMap(this, (r: Return) => Suspend(() => f(r), tr), tr)
@@ -91,7 +91,7 @@ trait Task[+Return] {
    * @return a new task with the transformed result
    */
   def flatMap[T](f: Return => Task[T])(implicit file: File, line: Line, enclosing: Enclosing): Task[T] = {
-    val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
+    val tr = if (Trace.Enabled) Trace(file, line, enclosing, "flatMap") else Trace.empty
     FlatMap(this, f, tr)
   }
 
@@ -249,7 +249,7 @@ trait Task[+Return] {
    * @return a new task that sleeps for the given duration after the existing task completes
    */
   def sleep(duration: FiniteDuration)(implicit file: File, line: Line, enclosing: Enclosing): Task[Return] = {
-    val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
+    val tr = if (Trace.Enabled) Trace(file, line, enclosing, "sleep") else Trace.empty
     effect(Sleep(duration, tr))
   }
 
@@ -305,7 +305,7 @@ trait Task[+Return] {
    * @return either the result of the task or an exception
    */
   def attempt(implicit file: File, line: Line, enclosing: Enclosing): Task[Try[Return]] = {
-    val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
+    val tr = if (Trace.Enabled) Trace(file, line, enclosing, "attempt") else Trace.empty
     HandleError[Try[Return]](
       this.map(v => Success(v): Try[Return]),
       t => Pure(Failure(t)),
@@ -329,7 +329,7 @@ trait Task[+Return] {
    * @return Task[R]
    */
   def handleError[R >: Return](f: Throwable => Task[R])(implicit file: File, line: Line, enclosing: Enclosing): Task[R] = {
-    val tr = if (Trace.Enabled) Trace(file, line, enclosing) else Trace.empty
+    val tr = if (Trace.Enabled) Trace(file, line, enclosing, "handleError") else Trace.empty
     HandleError(this, f, tr)
   }
 
@@ -509,11 +509,11 @@ object Task extends UnitTask {
   override def pure[T](value: T): Task[T] = Pure(value)
 
   def apply[T](f: => T)(implicit file: File, line: Line, enclosing: Enclosing): Task[T] =
-    Suspend(() => f, Trace(file, line, enclosing))
+    Suspend(() => f, Trace(file, line, enclosing, "apply"))
 
   /** No-trace constructor to avoid sourcecode implicits in hot paths */
   def suspend[T](f: () => T): Task[T] = Suspend(f, Trace.empty)
 
   def completable[T](implicit file: File, line: Line, enclosing: Enclosing): Completable[T] =
-    Completable[T](Trace(file, line, enclosing))
+    Completable[T](Trace(file, line, enclosing, "completable"))
 }

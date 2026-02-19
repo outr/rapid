@@ -9,17 +9,10 @@ import scala.util.{Failure, Success, Try}
 
 private[rapid] sealed trait ErrorHandler
 private[rapid] case class ErrorHandlerMarker(handler: Throwable => Task[Any], trace: Trace) extends ErrorHandler
+private[rapid] case class TraceMarker(trace: Trace)
 
 class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
-  private val TraceBufSize = 256
   private val tracing = Trace.Enabled
-  private val traceBuf: Array[Trace] = if (tracing) new Array[Trace](TraceBufSize) else null
-  private var traceIdx = 0
-
-  @inline private def record(tr: Trace): Unit = if (tracing && tr != Trace.empty) {
-    traceBuf(traceIdx & (TraceBufSize - 1)) = tr
-    traceIdx += 1
-  }
 
   private var lastTrace: Trace = Trace.empty
   private val stack = new mutable.ArrayDeque[Any]
@@ -32,6 +25,25 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   stack.append(task)
   runLoop()
 
+  private def collectTraces(): List[Trace] = {
+    val traces = new mutable.ListBuffer[Trace]
+    if (lastTrace != Trace.empty) traces += lastTrace
+    var i = stack.size - 1
+    while (i >= 0) {
+      stack(i) match {
+        case TraceMarker(tr) if tr != Trace.empty => traces += tr
+        case ErrorHandlerMarker(_, tr) if tr != Trace.empty => traces += tr
+        case _ =>
+      }
+      i -= 1
+    }
+    traces.distinct.toList
+  }
+
+  private def applyTraces(t: Throwable): Throwable = {
+    if (tracing) Trace.update(t, collectTraces()) else t
+  }
+
   private def runLoop(): Unit = {
     try {
       while (stack.nonEmpty && !suspended) {
@@ -42,14 +54,7 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
       }
     } catch {
       case t: Throwable =>
-        val error = if (tracing) {
-          val n = math.min(traceIdx, TraceBufSize)
-          val frames =
-            List.tabulate(n)(i => traceBuf((traceIdx - 1 - i) & (TraceBufSize - 1)))
-              .filter(_ != Trace.empty)
-              .distinct
-          Trace.update(t, frames)
-        } else t
+        val error = applyTraces(t)
         if (findAndApplyErrorHandler(error)) {
           runLoop()
         } else {
@@ -79,25 +84,16 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
         case Pure(value) =>
           previous = value
         case Suspend(f, tr) =>
-          if (tracing) {
-            lastTrace = tr
-            record(tr)
-          }
+          if (tracing) lastTrace = tr
           previous = f()
         case Sleep(duration, tr) =>
-          if (tracing) {
-            lastTrace = tr
-            record(tr)
-          }
+          if (tracing) lastTrace = tr
           suspended = true
           Platform.scheduleDelay(duration.toMillis) { () =>
             resume(())
           }
         case c: Completable[_] =>
-          if (tracing) {
-            lastTrace = c.trace
-            record(c.trace)
-          }
+          if (tracing) lastTrace = c.trace
           c.result match {
             case Some(Success(v)) =>
               previous = v
@@ -111,26 +107,27 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
               }
           }
         case HandleError(inner, handler, tr) =>
-          if (tracing) {
-            lastTrace = tr
-            record(tr)
-          }
+          if (tracing) lastTrace = tr
           stack.append(ErrorHandlerMarker(handler.asInstanceOf[Throwable => Task[Any]], tr))
           stack.append(inner)
         case FlatMap(input, f, tr) =>
-          if (tracing) stack.append((f, tr)) else stack.append(f)
+          if (tracing) {
+            stack.append(TraceMarker(tr))
+            stack.append((f, tr))
+          } else {
+            stack.append(f)
+          }
           stack.append(input)
       }
     case _: ErrorHandlerMarker =>
+      ()
+    case _: TraceMarker =>
       ()
     case f: Function1[_, _] =>
       val next = f.asInstanceOf[Any => Task[Any]](previous)
       stack.append(next)
     case (f: Function1[_, _], tr: Trace) =>
-      if (tracing) {
-        lastTrace = tr
-        record(tr)
-      }
+      if (tracing) lastTrace = tr
       val next = f.asInstanceOf[Any => Task[Any]](previous)
       stack.append(next)
   }
@@ -144,7 +141,12 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   private def resumeWithError(t: Throwable): Unit = {
     suspended = false
     Platform.schedule { () =>
-      completeWith(Failure(t))
+      val error = applyTraces(t)
+      if (findAndApplyErrorHandler(error)) {
+        runLoop()
+      } else {
+        completeWith(Failure(error))
+      }
     }
   }
 
