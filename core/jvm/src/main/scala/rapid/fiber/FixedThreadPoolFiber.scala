@@ -53,17 +53,17 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
     stack.push(root)
 
     private def collectTraces(): List[Trace] = {
-      val traces = new scala.collection.mutable.ListBuffer[Trace]
-      if (lastTrace != Trace.empty) traces += lastTrace
-      val it = stack.iterator()
+      val seen = new scala.collection.mutable.LinkedHashSet[Trace]
+      if (lastTrace != Trace.empty) seen += lastTrace
+      val it = stack.descendingIterator()
       while (it.hasNext) {
         it.next() match {
-          case TraceMarker(tr) if tr != Trace.empty => traces += tr
-          case ErrorHandlerMarker(_, tr) if tr != Trace.empty => traces += tr
+          case tr: Trace if tr != Trace.empty => seen += tr
+          case ErrorHandlerMarker(_, tr) if tr != Trace.empty => seen += tr
           case _ =>
         }
       }
-      traces.distinct.toList
+      seen.toList
     }
 
     private def applyTraces(t: Throwable): Throwable = {
@@ -127,7 +127,7 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
                   stack.push(inner)
                 case FlatMap(input, f, tr) =>
                   if (tracing) {
-                    stack.push(TraceMarker(tr))
+                    stack.push(tr)
                     stack.push((f, tr))
                   } else {
                     stack.push(f)
@@ -136,7 +136,7 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
               }
             case _: ErrorHandlerMarker =>
               ()
-            case _: TraceMarker =>
+            case _: Trace =>
               ()
             case f: Function1[_, _] =>
               val next = f.asInstanceOf[Any => Task[Any]](previous)

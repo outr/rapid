@@ -9,7 +9,6 @@ import scala.util.{Failure, Success, Try}
 
 private[rapid] sealed trait ErrorHandler
 private[rapid] case class ErrorHandlerMarker(handler: Throwable => Task[Any], trace: Trace) extends ErrorHandler
-private[rapid] case class TraceMarker(trace: Trace)
 
 class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   private val tracing = Trace.Enabled
@@ -26,18 +25,18 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   runLoop()
 
   private def collectTraces(): List[Trace] = {
-    val traces = new mutable.ListBuffer[Trace]
-    if (lastTrace != Trace.empty) traces += lastTrace
+    val seen = new mutable.LinkedHashSet[Trace]
+    if (lastTrace != Trace.empty) seen += lastTrace
     var i = stack.size - 1
     while (i >= 0) {
       stack(i) match {
-        case TraceMarker(tr) if tr != Trace.empty => traces += tr
-        case ErrorHandlerMarker(_, tr) if tr != Trace.empty => traces += tr
+        case tr: Trace if tr != Trace.empty => seen += tr
+        case ErrorHandlerMarker(_, tr) if tr != Trace.empty => seen += tr
         case _ =>
       }
       i -= 1
     }
-    traces.distinct.toList
+    seen.toList
   }
 
   private def applyTraces(t: Throwable): Throwable = {
@@ -112,7 +111,7 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
           stack.append(inner)
         case FlatMap(input, f, tr) =>
           if (tracing) {
-            stack.append(TraceMarker(tr))
+            stack.append(tr)
             stack.append((f, tr))
           } else {
             stack.append(f)
@@ -121,7 +120,7 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
       }
     case _: ErrorHandlerMarker =>
       ()
-    case _: TraceMarker =>
+    case _: Trace =>
       ()
     case f: Function1[_, _] =>
       val next = f.asInstanceOf[Any => Task[Any]](previous)

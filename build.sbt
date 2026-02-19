@@ -1,11 +1,3 @@
-// Scala versions
-val scala213 = "2.13.18"
-
-val scala3 = "3.3.7"
-
-val scala2 = List(scala213)
-val allScalaVersions = scala3 :: scala2
-
 // Variables
 val org: String = "com.outr"
 val projectName: String = "rapid"
@@ -18,8 +10,7 @@ val developerURL: String = "https://matthicks.com"
 name := projectName
 ThisBuild / organization := org
 ThisBuild / version := "2.6.0-SNAPSHOT"
-ThisBuild / scalaVersion := scala3
-ThisBuild / crossScalaVersions := allScalaVersions
+ThisBuild / scalaVersion := "3.8.1"
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
 
 ThisBuild / sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost
