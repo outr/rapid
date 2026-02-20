@@ -87,9 +87,14 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
           previous = f()
         case Sleep(duration, tr) =>
           if (tracing) lastTrace = tr
-          suspended = true
-          Platform.scheduleDelay(duration.toMillis) { () =>
-            resume(())
+          if (Platform.isVirtualThread) {
+            Platform.delay(duration.toMillis)
+            previous = ()
+          } else {
+            suspended = true
+            Platform.scheduleDelay(duration.toMillis) { () =>
+              resume(())
+            }
           }
         case c: Completable[_] =>
           if (tracing) lastTrace = c.trace
@@ -99,10 +104,18 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
             case Some(Failure(t)) =>
               throw t
             case None =>
-              suspended = true
-              c.onComplete {
-                case Success(v) => resume(v)
-                case Failure(t) => resumeWithError(t)
+              if (Platform.isVirtualThread) {
+                while (c.result.isEmpty) Platform.delay(1)
+                c.result.get match {
+                  case Success(v) => previous = v
+                  case Failure(t) => throw t
+                }
+              } else {
+                suspended = true
+                c.onComplete {
+                  case Success(v) => resume(v)
+                  case Failure(t) => resumeWithError(t)
+                }
               }
           }
         case HandleError(inner, handler, tr) =>

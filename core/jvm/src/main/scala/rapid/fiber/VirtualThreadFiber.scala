@@ -13,8 +13,11 @@ class VirtualThreadFiber[Return](task: Task[Return]) extends Fiber[Return] {
   private val thread = Thread
     .ofVirtual()
     .start(() => {
-      val r = Try(SynchronousFiber(task).awaitBlocking())
-      completeWith(r)
+      try {
+        completeWith(Success(SynchronousFiber(task).awaitBlocking()))
+      } catch {
+        case t: Throwable => completeWith(Failure(t))
+      }
     })
 
   private def completeWith(result: Try[Return]): Unit = lock.synchronized {

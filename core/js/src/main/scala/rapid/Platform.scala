@@ -13,6 +13,7 @@ object Platform extends RapidPlatform {
   override def createFiber[Return](task: Task[Return]): Fiber[Return] =
     new SynchronousFiber[Return](task)
 
+  override def isVirtualThread: Boolean = false
   override def delay(millis: Long): Unit = ()
 
   override def runAsync(task: Task[_]): Unit =

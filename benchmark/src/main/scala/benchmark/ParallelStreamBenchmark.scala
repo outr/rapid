@@ -4,7 +4,7 @@ import cats.effect.kernel.{Deferred, Fiber, Poll, Ref, Unique}
 import cats.effect.{Concurrent, IO}
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
-import rapid.Task
+import rapid.*
 import rapid.cats._
 import rapid.trace.Trace
 
@@ -92,7 +92,7 @@ class ParallelStreamBenchmark {
 
   @Benchmark
   def fs2ParEvalMapSum(): Long = {
-    import cats.effect.IO
+    import _root_.cats.effect.IO
     val ref = new java.util.concurrent.atomic.AtomicLong(0L)
     fs2Stream.parEvalMap(32) { i =>
       IO { ref.addAndGet(i.toLong) }

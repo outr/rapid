@@ -22,6 +22,8 @@ trait RapidPlatform {
   def schedule(thunk: () => Unit): Unit
   /** Schedule a thunk to run after a delay in milliseconds. */
   def scheduleDelay(millis: Long)(thunk: () => Unit): Unit
+  /** Returns true if the current thread is a virtual thread (JVM only). */
+  def isVirtualThread: Boolean
   /** Block until the fiber completes and return the result. On JS, throws if the fiber hasn't completed. */
   def awaitFiber[R](fiber: Fiber[R]): R
 }

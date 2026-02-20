@@ -53,7 +53,7 @@ class ManySleepsBenchmark {
     Trace.Enabled = false
     val completed = new AtomicInteger(0)
     (1 to tasks).foreach { _ =>
-      Task.sleep(sleepTime).map(_ => completed.incrementAndGet()).start()
+      Task.sleep(sleepTime).map(_ => completed.incrementAndGet()).startUnit()
     }
     waitForComplete(completed)
   }

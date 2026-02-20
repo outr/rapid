@@ -504,7 +504,7 @@ object Task extends UnitTask {
    *
    * Defaults to true
    */
-  var Virtual: Boolean = true
+  var Virtual: Boolean = false
 
   override def pure[T](value: T): Task[T] = Pure(value)
 
