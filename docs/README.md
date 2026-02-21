@@ -159,6 +159,8 @@ sum.get() // Sum of 1..100
 Parallel reduction with per-thread accumulation and final merge.
 
 ```scala mdoc
+import rapid._
+
 val streamResult = Stream.emits(1 to 100)
   .parFold(0L, threads = 8)(
     (acc, i) => Task.pure(acc + i),
