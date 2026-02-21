@@ -123,13 +123,30 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
           stack.append(ErrorHandlerMarker(handler.asInstanceOf[Throwable => Task[Any]], tr))
           stack.append(inner)
         case FlatMap(input, f, tr) =>
-          if (tracing) {
-            stack.append(tr)
-            stack.append((f, tr))
-          } else {
-            stack.append(f)
+          if (tracing) lastTrace = tr
+          input match {
+            case Pure(v) =>
+              previous = v
+              if (tracing) stack.append(tr)
+              stack.append(f.asInstanceOf[Any => Task[Any]](v))
+            case Suspend(s, tr2) =>
+              if (tracing) lastTrace = tr2
+              previous = s()
+              if (tracing) stack.append(tr)
+              stack.append(f.asInstanceOf[Any => Task[Any]](previous))
+            case _: UnitTask =>
+              previous = ()
+              if (tracing) stack.append(tr)
+              stack.append(f.asInstanceOf[Any => Task[Any]](()))
+            case _ =>
+              if (tracing) {
+                stack.append(tr)
+                stack.append((f, tr))
+              } else {
+                stack.append(f)
+              }
+              stack.append(input)
           }
-          stack.append(input)
       }
     case _: ErrorHandlerMarker =>
       ()
@@ -137,11 +154,25 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
       ()
     case f: Function1[_, _] =>
       val next = f.asInstanceOf[Any => Task[Any]](previous)
-      stack.append(next)
+      next match {
+        case Pure(v) => previous = v
+        case Suspend(s, tr2) =>
+          if (tracing) lastTrace = tr2
+          previous = s()
+        case _: UnitTask => previous = ()
+        case _ => stack.append(next)
+      }
     case (f: Function1[_, _], tr: Trace) =>
       if (tracing) lastTrace = tr
       val next = f.asInstanceOf[Any => Task[Any]](previous)
-      stack.append(next)
+      next match {
+        case Pure(v) => previous = v
+        case Suspend(s, tr2) =>
+          if (tracing) lastTrace = tr2
+          previous = s()
+        case _: UnitTask => previous = ()
+        case _ => stack.append(next)
+      }
   }
 
   private def resume(result: Any): Unit = {

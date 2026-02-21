@@ -133,7 +133,7 @@ lazy val benchmark = project.in(file("benchmark"))
       "org.openjdk.jmh" % "jmh-generator-annprocess" % "1.37",
       "org.typelevel" %% "cats-effect" % catsVersion,
       "co.fs2" %% "fs2-core" % fs2Version,
-      "dev.zio" %% "zio" % "2.1.22"
+      "dev.zio" %% "zio" % "2.1.24"
     )
   )
 

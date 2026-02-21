@@ -17,7 +17,7 @@ import scala.util.Random
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 class ManySleepsBenchmark {
-  private val tasks = 10_000_000
+  private val tasks = 1_000_000
   private def sleepTime = Random.nextInt(10).seconds
 
   // Reuse ZIO runtime; creating it is expensive
@@ -31,6 +31,7 @@ class ManySleepsBenchmark {
 
   @Benchmark
   def ioBenchmark(): Unit = {
+    Random.setSeed(123)
     val completed = new AtomicInteger(0)
     (1 to tasks).foreach { _ =>
       IO.sleep(sleepTime).map(_ => completed.incrementAndGet()).unsafeRunAndForget()
@@ -40,6 +41,7 @@ class ManySleepsBenchmark {
 
   @Benchmark
   def zioBenchmark(): Unit = {
+    Random.setSeed(123)
     val completed = new AtomicInteger(0)
     (1 to tasks).foreach { _ =>
       val zio = ZIO.sleep(Duration.fromScala(sleepTime)).map(_ => completed.incrementAndGet())
@@ -49,8 +51,22 @@ class ManySleepsBenchmark {
   }
 
   @Benchmark
-  def rapidBenchmark(): Unit = {
+  def rapidVirtualBenchmark(): Unit = {
     Trace.Enabled = false
+    Task.Virtual = true
+    Random.setSeed(123)
+    val completed = new AtomicInteger(0)
+    (1 to tasks).foreach { _ =>
+      Task.sleep(sleepTime).map(_ => completed.incrementAndGet()).startUnit()
+    }
+    waitForComplete(completed)
+  }
+
+  @Benchmark
+  def rapidFixedBenchmark(): Unit = {
+    Trace.Enabled = false
+    Task.Virtual = false
+    Random.setSeed(123)
     val completed = new AtomicInteger(0)
     (1 to tasks).foreach { _ =>
       Task.sleep(sleepTime).map(_ => completed.incrementAndGet()).startUnit()

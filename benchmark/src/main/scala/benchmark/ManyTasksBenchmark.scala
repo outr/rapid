@@ -57,14 +57,30 @@ class ManyTasksBenchmark {
   }
 
   @Benchmark
-  def rapidBenchmark(): Unit = {
+  def rapidVirtualBenchmark(): Unit = {
     Trace.Enabled = false
+    Task.Virtual = true
     val latch = new CountDownLatch(tasks)
     var i = 0
     while (i < tasks) {
       val n = 163 + i
-//      Task.suspend(() => { val r = math.round(math.sqrt(n.toDouble)).toInt; latch.countDown(); r })
-//        .startUnit()
+      Task(math.round(math.sqrt(n.toDouble)).toInt)
+        .map(_ => latch.countDown())
+        .start()
+      i += 1
+    }
+    latch.await()
+    assert(i == tasks)
+  }
+
+  @Benchmark
+  def rapidFixedBenchmark(): Unit = {
+    Trace.Enabled = false
+    Task.Virtual = false
+    val latch = new CountDownLatch(tasks)
+    var i = 0
+    while (i < tasks) {
+      val n = 163 + i
       Task(math.round(math.sqrt(n.toDouble)).toInt)
         .map(_ => latch.countDown())
         .start()

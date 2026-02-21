@@ -15,7 +15,11 @@ object Platform extends RapidPlatform {
   override def isVirtualThread: Boolean = Thread.currentThread().isVirtual
   override def delay(millis: Long): Unit = Thread.sleep(millis)
   override def runAsync(task: Task[_]): Unit =
-    rapid.fiber.FixedThreadPoolFiber.execute(() => { new SynchronousFiber(task); () })
+    if (Task.Virtual) {
+      Thread.ofVirtual().start(() => { new SynchronousFiber(task); () })
+    } else {
+      rapid.fiber.FixedThreadPoolFiber.execute(() => { new SynchronousFiber(task); () })
+    }
 
   override def yieldNow(): Unit = Thread.`yield`()
 

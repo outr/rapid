@@ -504,7 +504,7 @@ object Task extends UnitTask {
    *
    * Defaults to true
    */
-  var Virtual: Boolean = false
+  var Virtual: Boolean = true
 
   override def pure[T](value: T): Task[T] = Pure(value)
 
@@ -516,4 +516,29 @@ object Task extends UnitTask {
 
   def completable[T](implicit file: File, line: Line, enclosing: Enclosing): Completable[T] =
     Completable[T](Trace(file, line, enclosing, "completable"))
+
+  /** Fast-path evaluator for tasks that are typically Pure or Suspend. Falls back to SynchronousFiber for complex tasks. */
+  private[rapid] def quickEval[T](task: Task[T]): T = {
+    var current: Task[Any] = task
+    while (true) {
+      current match {
+        case Pure(v) => return v.asInstanceOf[T]
+        case s: Suspend[_] => return s.f().asInstanceOf[T]
+        case _: UnitTask => return ().asInstanceOf[T]
+        case FlatMap(input, f, _) =>
+          input match {
+            case Pure(v) => current = f.asInstanceOf[Any => Task[Any]](v)
+            case s: Suspend[_] => current = f.asInstanceOf[Any => Task[Any]](s.f())
+            case _: UnitTask => current = f.asInstanceOf[Any => Task[Any]](())
+            case FlatMap(inner, g, _) =>
+              // Reassociate: FlatMap(FlatMap(inner, g), f) → FlatMap(inner, x => FlatMap(g(x), f))
+              val ff = f.asInstanceOf[Any => Task[Any]]
+              current = FlatMap(inner, (x: Any) => FlatMap(g.asInstanceOf[Any => Task[Any]](x), ff, Trace.empty), Trace.empty)
+            case _ => return Platform.awaitFiber(new SynchronousFiber(current.asInstanceOf[Task[T]]))
+          }
+        case _ => return Platform.awaitFiber(new SynchronousFiber(current.asInstanceOf[Task[T]]))
+      }
+    }
+    throw new AssertionError("unreachable")
+  }
 }

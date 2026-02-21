@@ -35,7 +35,14 @@ class StreamBenchmark {
   }
 
   @Benchmark
-  def rapidStreamToList(): List[Int] = {
+  def rapidVirtualStreamToList(): List[Int] = {
+    Task.Virtual = true
+    verify(rapidStream.toList.sync())
+  }
+
+  @Benchmark
+  def rapidFixedStreamToList(): List[Int] = {
+    Task.Virtual = false
     verify(rapidStream.toList.sync())
   }
 
@@ -45,7 +52,14 @@ class StreamBenchmark {
   }
 
   @Benchmark
-  def rapidStreamFilter(): List[Int] = {
+  def rapidVirtualStreamFilter(): List[Int] = {
+    Task.Virtual = true
+    verify(rapidStream.filter(_ % 2 == 0).toList.sync(), size / 2)
+  }
+
+  @Benchmark
+  def rapidFixedStreamFilter(): List[Int] = {
+    Task.Virtual = false
     verify(rapidStream.filter(_ % 2 == 0).toList.sync(), size / 2)
   }
 
@@ -55,7 +69,14 @@ class StreamBenchmark {
   }
 
   @Benchmark
-  def rapidStreamMap(): List[Int] = {
+  def rapidVirtualStreamMap(): List[Int] = {
+    Task.Virtual = true
+    verify(rapidStream.map(_ * 2).toList.sync())
+  }
+
+  @Benchmark
+  def rapidFixedStreamMap(): List[Int] = {
+    Task.Virtual = false
     verify(rapidStream.map(_ * 2).toList.sync())
   }
 
@@ -65,7 +86,23 @@ class StreamBenchmark {
   }
 
   @Benchmark
-  def rapidParForeach(): Long = {
+  def rapidVirtualParForeach(): Long = {
+    Task.Virtual = true
+    val add = new AtomicLong(0L)
+    rapidStream.parForeach(32) { i =>
+      add.addAndGet(i.toLong)
+      Task.unit
+    }.sync()
+    val s = add.get()
+    // Verify correctness: sum(1..size)
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected, s"parForeach sum $s != expected $expected")
+    s
+  }
+
+  @Benchmark
+  def rapidFixedParForeach(): Long = {
+    Task.Virtual = false
     val add = new AtomicLong(0L)
     rapidStream.parForeach(32) { i =>
       add.addAndGet(i.toLong)

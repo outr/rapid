@@ -47,8 +47,20 @@ class OverheadBenchmark {
   }
 
   @Benchmark
-  def rapidBenchmark(): Unit = {
+  def rapidVirtualBenchmark(): Unit = {
     Trace.Enabled = false
+    Task.Virtual = true
+    val task = (1 to iterations).foldLeft(Task(0))((t, i) => t.flatMap { total =>
+      Task(total + simpleComputation)
+    })
+    val result = task.sync()
+    verify("Rapid", result)
+  }
+
+  @Benchmark
+  def rapidFixedBenchmark(): Unit = {
+    Trace.Enabled = false
+    Task.Virtual = false
     val task = (1 to iterations).foldLeft(Task(0))((t, i) => t.flatMap { total =>
       Task(total + simpleComputation)
     })
