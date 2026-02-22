@@ -10,7 +10,7 @@ case class ParallelStreamProcessor[T, R](stream: ParallelStream[T, R],
                                          handle: R => Unit,
                                          complete: Int => Unit,
                                          onError: Throwable => Unit) {
-  private val pullTask: Task[Pull[T]] = Stream.task(stream.stream)
+  private val pullTask: Task[Pull[T]] = stream.stream.task
   private val workQueue = new BoundedMPMCQueue[(T, Int)](stream.maxBuffer)
   private val readyQueue = new ConcurrentLinkedQueue[ReadyCell]()
   @volatile private var _total = -1

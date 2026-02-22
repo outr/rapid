@@ -25,7 +25,7 @@ object Platform extends RapidPlatform {
 
   override def compileParallelStream[T, R](stream: ParallelStream[T, R], handle: R => Unit, complete: Int => Unit, onError: Throwable => Unit): Unit = {
     try {
-      val pull = Stream.task(stream.stream).sync()
+      val pull = stream.stream.task.sync()
       var count = 0
       val stack = new java.util.ArrayDeque[Pull[T]]()
       var current: Pull[T] = pull

@@ -1,0 +1,3 @@
+package rapid
+
+trait StreamPlatformCompanion

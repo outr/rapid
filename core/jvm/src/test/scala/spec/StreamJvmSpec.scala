@@ -30,7 +30,7 @@ class StreamJvmSpec extends AbstractBlockingStreamSpec {
           super.close()
         }
       }
-      val out = StreamIO.fromInputStream(Task.pure(is)).toList.sync()
+      val out = Stream.fromInputStream(Task.pure(is)).toList.sync()
       out.map(_.toChar).mkString shouldEqual "abc"
       closed shouldBe true
     }

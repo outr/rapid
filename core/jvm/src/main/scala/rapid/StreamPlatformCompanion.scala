@@ -5,10 +5,10 @@ import java.nio.file.{Files, Path}
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
-object StreamIO {
+trait StreamPlatformCompanion { self: StreamCompanion =>
   def fromPath(path: Path): Stream[Byte] = fromFile(path.toFile)
 
-  def listDirectory(directory: Path): Stream[Path] = Stream.force(Task {
+  def listDirectory(directory: Path): Stream[Path] = force(Task {
     val ds = Files.newDirectoryStream(directory)
     val closed = new AtomicBoolean(false)
 
@@ -26,17 +26,16 @@ object StreamIO {
       override def next(): Path = baseIt.next()
     }
 
-    Stream
-      .fromIterator(Task.pure(it))
+    fromIterator(Task.pure(it))
       .onFinalize(Task(closeOnce()))
   })
 
   def listDirectory[B](directory: Path, sortBy: Path => B)
-                      (implicit ordering: Ordering[B]): Stream[Path] = Stream.force(Task {
+                       (implicit ordering: Ordering[B]): Stream[Path] = force(Task {
     val ds = Files.newDirectoryStream(directory)
     try {
       val list = ds.iterator().asScala.toList.sortBy(sortBy)(ordering)
-      Stream.emits(list)
+      emits(list)
     } finally {
       ds.close()
     }
