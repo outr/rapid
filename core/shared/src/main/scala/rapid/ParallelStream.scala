@@ -39,7 +39,7 @@ case class ParallelStream[T, R](stream: Stream[T],
   }
 
   protected def compile(handle: R => Unit, complete: Int => Unit, onError: Throwable => Unit): Unit =
-    ParallelStreamProcessor(this, handle, complete, onError)
+    Platform.compileParallelStream(this, handle, complete, onError)
 }
 
 object ParallelStream {

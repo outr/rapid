@@ -1,0 +1,3 @@
+package spec
+
+class StreamNativeSpec extends AbstractBlockingStreamSpec

@@ -104,14 +104,6 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       println(monitor.report())
       Task.succeed
     }
-    "verify SingleThreadAgent works" in {
-      val sta = SingleThreadAgent("test")(Task.pure(""))
-      sta { _ =>
-        Thread.currentThread().getName
-      }.map { threadName =>
-        threadName should be("test-sta")
-      }.guarantee(sta.dispose())
-    }
     "handle condition" in {
       var counter = 0
       Task.condition(Task {
@@ -139,9 +131,12 @@ class BasicsAsyncSpec extends AsyncWordSpec with AsyncTaskSpec with Matchers wit
       val timed = Task.timed(timer) {
         Task.sleep(25.millis)
       }
+      val start = System.currentTimeMillis()
       (0 until 10).map(_ => timed).tasksPar.function {
         timer.elapsedMillis should be >= 250L
         timer.elapsedMillis should be <= 500L
+        val elapsed = System.currentTimeMillis() - start
+        elapsed should be < 250L
       }
     }
     "verify CompletableTask.onSuccess" in {

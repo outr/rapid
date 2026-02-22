@@ -1,22 +1,17 @@
 package rapid
 
-import java.io.{BufferedInputStream, File, FileInputStream, InputStream}
-import java.nio.file.{Files, Path}
-import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
-import scala.io.Source
-import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 /**
  * A lazy, pull-based stream abstraction for processing elements with full support for concurrency and composability.
  *
  * @tparam Return the type of the elements emitted by this stream
  */
-class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
+class Stream[+Return](private[rapid] val task: Task[Pull[Return]]) {
   def transform[T](f: Return => Step[T]): Stream[T] =
     new Stream[T](task.map { outer =>
       lazy val mapStep: Task[Step[Return]] => Task[Step[T]] = { stepTask =>
@@ -48,7 +43,7 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @tparam T the new return type
    */
   def collect[T](f: PartialFunction[Return, T]): Stream[T] =
-    transform(r => f.lift(r).map(Step.Emit(_)).getOrElse(Step.Skip))
+    transform(r => if (f.isDefinedAt(r)) Step.Emit(f(r)) else Step.Skip)
 
   /**
    * Takes values from the stream while the given predicate holds.
@@ -167,7 +162,17 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @return a new stream with the transformed values
    */
   def flatMap[T](f: Return => Stream[T]): Stream[T] =
-    transform[T] { a => Step.Concat(f(a).task.sync()) }
+    new Stream[T](task.map { outer =>
+      lazy val mapStep: Task[Step[Return]] => Task[Step[T]] = { stepTask =>
+        stepTask.flatMap {
+          case Step.Emit(a) => f(a).task.map(innerPull => Step.Concat(innerPull): Step[T])
+          case Step.Skip => Stream.PureSkip
+          case Step.Stop => Stream.PureStop
+          case Step.Concat(inner) => Task.pure(Step.Concat(inner.transform(mapStep)))
+        }
+      }
+      outer.transform(mapStep)
+    })
 
   /**
    * Transforms the values in the stream using the given function that returns a task.
@@ -176,7 +181,18 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @tparam T the type of the values in the tasks
    * @return a new stream with the transformed values
    */
-  def evalMap[T](f: Return => Task[T]): Stream[T] = transform(a => Step.Emit(f(a).sync()))
+  def evalMap[T](f: Return => Task[T]): Stream[T] =
+    new Stream[T](task.map { outer =>
+      lazy val mapStep: Task[Step[Return]] => Task[Step[T]] = { stepTask =>
+        stepTask.flatMap {
+          case Step.Emit(a) => f(a).map(v => Step.Emit(v): Step[T])
+          case Step.Skip => Stream.PureSkip
+          case Step.Stop => Stream.PureStop
+          case Step.Concat(inner) => Task.pure(Step.Concat(inner.transform(mapStep)))
+        }
+      }
+      outer.transform(mapStep)
+    })
 
   /**
    * Transforms the values in the stream using the given function that returns a task option.
@@ -187,7 +203,18 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    */
   def evalFlatMap[T](f: Return => Task[Option[T]]): Stream[T] = evalMap(f).flatten
 
-  def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] = transform(a => Step.Emit(forge(a).sync()))
+  def evalForge[R >: Return, T](forge: Forge[R, T]): Stream[T] =
+    new Stream[T](task.map { outer =>
+      lazy val mapStep: Task[Step[Return]] => Task[Step[T]] = { stepTask =>
+        stepTask.flatMap {
+          case Step.Emit(a) => forge(a).map(v => Step.Emit(v): Step[T])
+          case Step.Skip => Stream.PureSkip
+          case Step.Stop => Stream.PureStop
+          case Step.Concat(inner) => Task.pure(Step.Concat(inner.transform(mapStep)))
+        }
+      }
+      outer.transform(mapStep)
+    })
 
   /**
    * Similar to evalMap, but doesn't change the result. Allows doing something with each value without changing the
@@ -201,10 +228,18 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   /**
    * Synonym for evalTap
    */
-  def evalForeach(f: Return => Task[Unit]): Stream[Return] = transform { a =>
-    f(a).sync()
-    Step.Emit(a)
-  }
+  def evalForeach(f: Return => Task[Unit]): Stream[Return] =
+    new Stream[Return](task.map { outer =>
+      lazy val mapStep: Task[Step[Return]] => Task[Step[Return]] = { stepTask =>
+        stepTask.flatMap {
+          case Step.Emit(a) => f(a).map(_ => Step.Emit(a): Step[Return])
+          case Step.Skip => Stream.PureSkip
+          case Step.Stop => Stream.PureStop
+          case Step.Concat(inner) => Task.pure(Step.Concat(inner.transform(mapStep)))
+        }
+      }
+      outer.transform(mapStep)
+    })
 
   def every(duration: FiniteDuration, onlyOnChange: Boolean = false)
            (f: Return => Task[Unit]): Stream[Return] = {
@@ -291,7 +326,6 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       var curKey: Option[G] = None
       var flushed = false
 
-      // Inner transform: handle elements and concat traversal only. Do NOT flush on Stop here.
       lazy val mapStep: Task[Step[Return]] => Task[Step[Grouped[G, R]]] = { st =>
         st.map {
           case Step.Emit(e) =>
@@ -319,7 +353,6 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       }
 
       val base = pullR.transform(mapStep)
-      // Outer transform: perform a single final flush when the ROOT pull stops.
       base.transform { st =>
         st.map {
           case Step.Stop if curKey.nonEmpty && buf.nonEmpty && !flushed =>
@@ -345,9 +378,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   def group(separator: Return => Boolean): Stream[List[Return]] =
     new Stream(task.map { pullR =>
       val buf = scala.collection.mutable.ListBuffer.empty[Return]
-      Pull.fromFunction[List[Return]]({ () =>
-        @annotation.tailrec
-        def nextGroup(): Step[List[Return]] = pullR.pull.sync() match {
+      def nextGroup(): Task[Step[List[Return]]] =
+        pullR.pull.flatMap {
           case Step.Emit(r) if !separator(r) =>
             buf += r
             nextGroup()
@@ -355,25 +387,23 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
             if (buf.nonEmpty) {
               val out = buf.toList
               buf.clear()
-              Step.Emit(out)
+              Task.pure(Step.Emit(out))
             } else {
               nextGroup()
             }
           case Step.Skip => nextGroup()
-          case Step.Concat(inner) =>
-            Step.Concat(inner.transform(_ => Task.pure(Step.Skip))).asInstanceOf[Step[List[Return]]]
+          case Step.Concat(_) =>
+            nextGroup()
           case Step.Stop =>
             if (buf.nonEmpty) {
               val out = buf.toList
               buf.clear()
-              Step.Emit(out)
+              Task.pure(Step.Emit(out))
             } else {
-              Step.Stop
+              Stream.PureStop
             }
         }
-
-        nextGroup()
-      }, pullR.close)
+      Pull(nextGroup(), pullR.close)
     })
 
   def drop(n: Int): Stream[Return] = {
@@ -454,73 +484,34 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
 
   def find(p: Return => Boolean): Task[Option[Return]] =
     task.flatMap { pullR =>
-      Task {
-        val stack = new java.util.ArrayDeque[Pull[Return]]()
-        var current: Pull[Return] = pullR
-        var result: Option[Return] = None
-        var done = false
-        while (!done && result.isEmpty) {
-          current.pull.sync() match {
-            case Step.Emit(r) => if (p(r)) result = Some(r)
-            case Step.Skip => ()
-            case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) =>
-              stack.push(current)
-              current = inner
+      def loop(current: Pull[Return], stack: List[Pull[Return]]): Task[Option[Return]] =
+        current.pull.flatMap {
+          case Step.Emit(r) => if (p(r)) Task.pure(Some(r)) else loop(current, stack)
+          case Step.Skip => loop(current, stack)
+          case Step.Stop => stack match {
+            case Nil => Task.pure(None)
+            case hd :: tl => loop(hd, tl)
           }
+          case Step.Concat(inner) => loop(inner, current :: stack)
         }
-        // Close all pulls
-        try {
-          current.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-        while (!stack.isEmpty) {
-          val p = stack.pop()
-          try {
-            p.close.handleError(_ => Task.unit).sync()
-          } catch {
-            case _: Throwable => ()
-          }
-        }
-        result
-      }.guarantee(pullR.close.handleError(_ => Task.unit))
+      loop(pullR, Nil).guarantee(pullR.close.handleError(_ => Task.unit))
     }
 
   def exists(p: Return => Boolean): Task[Boolean] = find(p).map(_.isDefined)
 
   def forall(p: Return => Boolean): Task[Boolean] =
     task.flatMap { pullR =>
-      Task {
-        val stack = new java.util.ArrayDeque[Pull[Return]]()
-        var current: Pull[Return] = pullR
-        var ok = true
-        var done = false
-        while (!done && ok) {
-          current.pull.sync() match {
-            case Step.Emit(r) => if (!p(r)) ok = false
-            case Step.Skip => ()
-            case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) =>
-              stack.push(current)
-              current = inner
+      def loop(current: Pull[Return], stack: List[Pull[Return]]): Task[Boolean] =
+        current.pull.flatMap {
+          case Step.Emit(r) => if (!p(r)) Task.pure(false) else loop(current, stack)
+          case Step.Skip => loop(current, stack)
+          case Step.Stop => stack match {
+            case Nil => Task.pure(true)
+            case hd :: tl => loop(hd, tl)
           }
+          case Step.Concat(inner) => loop(inner, current :: stack)
         }
-        try {
-          current.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-        while (!stack.isEmpty) {
-          val p0 = stack.pop()
-          try {
-            p0.close.handleError(_ => Task.unit).sync()
-          } catch {
-            case _: Throwable => ()
-          }
-        }
-        ok
-      }.guarantee(pullR.close.handleError(_ => Task.unit))
+      loop(pullR, Nil).guarantee(pullR.close.handleError(_ => Task.unit))
     }
 
   def contains[T >: Return](elem: T): Task[Boolean] = exists(_ == elem)
@@ -555,48 +546,38 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   def zip[T2](other: Stream[T2]): Stream[(Return, T2)] =
     new Stream(task.flatMap { pullA =>
       other.task.map { pullB =>
-        Pull.fromFunction[(Return, T2)]({ () =>
-          def nextA(): Option[Return] = {
-            val stack = new java.util.ArrayDeque[Pull[Return]]()
-            var cur: Pull[Return] = pullA
-            var out: Option[Return] = None
-            var done = false
-            while (!done && out.isEmpty) {
-              cur.pull.sync() match {
-                case Step.Emit(a) => out = Some(a)
-                case Step.Skip => ()
-                case Step.Stop => if (stack.isEmpty) done = true else cur = stack.pop()
-                case Step.Concat(in2) =>
-                  stack.push(cur)
-                  cur = in2
-              }
+        def nextVal[X](current: Pull[X], stack: List[Pull[X]]): Task[Option[(X, Pull[X], List[Pull[X]])]] =
+          current.pull.flatMap {
+            case Step.Emit(a) => Task.pure(Some((a, current, stack)))
+            case Step.Skip => nextVal(current, stack)
+            case Step.Stop => stack match {
+              case Nil => Task.pure(None)
+              case hd :: tl => nextVal(hd, tl)
             }
-            out
+            case Step.Concat(inner) => nextVal(inner, current :: stack)
           }
 
-          def nextB(): Option[T2] = {
-            val stack = new java.util.ArrayDeque[Pull[T2]]()
-            var cur: Pull[T2] = pullB
-            var out: Option[T2] = None
-            var done = false
-            while (!done && out.isEmpty) {
-              cur.pull.sync() match {
-                case e @ Step.Emit(_) => out = Some(e.value)
-                case Step.Skip => ()
-                case Step.Stop => if (stack.isEmpty) done = true else cur = stack.pop()
-                case e @ Step.Concat(_) =>
-                  stack.push(cur)
-                  cur = e.pull
+        var curA: Pull[Return] = pullA
+        var stackA: List[Pull[Return]] = Nil
+        var curB: Pull[T2] = pullB
+        var stackB: List[Pull[T2]] = Nil
+
+        val pullTask: Task[Step[(Return, T2)]] =
+          nextVal(curA, stackA).flatMap {
+            case None => Stream.PureStop
+            case Some((a, newCurA, newStackA)) =>
+              curA = newCurA
+              stackA = newStackA
+              nextVal(curB, stackB).map {
+                case None => Step.Stop
+                case Some((b, newCurB, newStackB)) =>
+                  curB = newCurB
+                  stackB = newStackB
+                  Step.Emit((a, b))
               }
-            }
-            out
           }
 
-          (nextA(), nextB()) match {
-            case (Some(a), Some(b)) => Step.Emit((a, b))
-            case _ => Step.Stop
-          }
-        }, pullA.close.flatMap(_ => pullB.close))
+        Pull(pullTask, pullA.close.flatMap(_ => pullB.close))
       }
     })
 
@@ -605,62 +586,55 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
       other.task.map { pullB =>
         var aDone = false
         var bDone = false
-        Pull.fromFunction[(T, T2)]({ () =>
-          def nextA(): Option[T] = if (aDone) None else {
-            val stack = new java.util.ArrayDeque[Pull[T]]()
-            var cur: Pull[T] = pullA.asInstanceOf[Pull[T]]
-            var out: Option[T] = None
-            var done = false
-            while (!done && out.isEmpty) {
-              cur.pull.sync() match {
-                case e @ Step.Emit(_) => out = Some(e.value)
-                case Step.Skip => ()
-                case Step.Stop =>
-                  if (stack.isEmpty) {
-                    done = true
-                    aDone = true
-                  } else {
-                    cur = stack.pop()
-                  }
-                case e @ Step.Concat(_) =>
-                  stack.push(cur)
-                  cur = e.pull
-              }
+
+        def nextA(current: Pull[T], stack: List[Pull[T]]): Task[Option[(T, Pull[T], List[Pull[T]])]] =
+          if (aDone) Task.pure(None)
+          else current.pull.flatMap {
+            case Step.Emit(a) => Task.pure(Some((a, current, stack)))
+            case Step.Skip => nextA(current, stack)
+            case Step.Stop => stack match {
+              case Nil =>
+                aDone = true
+                Task.pure(None)
+              case hd :: tl => nextA(hd, tl)
             }
-            out
+            case Step.Concat(inner) => nextA(inner, current :: stack)
           }
 
-          def nextB(): Option[T2] = if (bDone) None else {
-            val stack = new java.util.ArrayDeque[Pull[T2]]()
-            var cur: Pull[T2] = pullB
-            var out: Option[T2] = None
-            var done = false
-            while (!done && out.isEmpty) {
-              cur.pull.sync() match {
-                case e @ Step.Emit(_) => out = Some(e.value)
-                case Step.Skip => ()
-                case Step.Stop =>
-                  if (stack.isEmpty) {
-                    done = true
-                    bDone = true
-                  } else {
-                    cur = stack.pop()
-                  }
-                case e: Step.Concat[_] =>
-                  stack.push(cur)
-                  cur = e.pull
-              }
+        def nextB(current: Pull[T2], stack: List[Pull[T2]]): Task[Option[(T2, Pull[T2], List[Pull[T2]])]] =
+          if (bDone) Task.pure(None)
+          else current.pull.flatMap {
+            case Step.Emit(b) => Task.pure(Some((b, current, stack)))
+            case Step.Skip => nextB(current, stack)
+            case Step.Stop => stack match {
+              case Nil =>
+                bDone = true
+                Task.pure(None)
+              case hd :: tl => nextB(hd, tl)
             }
-            out
+            case Step.Concat(inner) => nextB(inner, current :: stack)
           }
 
-          val a = nextA().orElse(if (!bDone) Some(thisElem) else None)
-          val b = nextB().orElse(if (!aDone) Some(otherElem) else None)
-          (a, b) match {
-            case (Some(aa), Some(bb)) => Step.Emit((aa, bb))
-            case _ => Step.Stop
+        var curA: Pull[T] = pullA.asInstanceOf[Pull[T]]
+        var stackAV: List[Pull[T]] = Nil
+        var curB: Pull[T2] = pullB
+        var stackBV: List[Pull[T2]] = Nil
+
+        val pullTask: Task[Step[(T, T2)]] =
+          nextA(curA, stackAV).flatMap { optA =>
+            val aVal = optA.map { case (v, c, s) => curA = c; stackAV = s; v }
+              .orElse(if (!bDone) Some(thisElem) else None)
+            nextB(curB, stackBV).map { optB =>
+              val bVal = optB.map { case (v, c, s) => curB = c; stackBV = s; v }
+                .orElse(if (!aDone) Some(otherElem) else None)
+              (aVal, bVal) match {
+                case (Some(aa), Some(bb)) => Step.Emit((aa, bb))
+                case _ => Step.Stop
+              }
+            }
           }
-        }, pullA.close.flatMap(_ => pullB.close))
+
+        Pull(pullTask, pullA.close.flatMap(_ => pullB.close))
       }
     })
 
@@ -675,39 +649,14 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   }
 
   def groupBy[K](f: Return => K): Task[Map[K, List[Return]]] =
-    task.flatMap { pullR =>
+    fold(new scala.collection.mutable.HashMap[K, scala.collection.mutable.ListBuffer[Return]]) { (m, r) =>
       Task {
-        val m = new scala.collection.mutable.HashMap[K, scala.collection.mutable.ListBuffer[Return]]
-        val stack = new java.util.ArrayDeque[Pull[Return]]()
-        var current: Pull[Return] = pullR
-        var done = false
-        while (!done) {
-          current.pull.sync() match {
-            case Step.Emit(r) =>
-              val k = f(r)
-              val buf = m.getOrElseUpdate(k, scala.collection.mutable.ListBuffer.empty[Return])
-              buf += r
-            case Step.Skip => ()
-            case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) => stack.push(current); current = inner
-          }
-        }
-        try {
-          current.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-        while (!stack.isEmpty) {
-          val p0 = stack.pop()
-          try {
-            p0.close.handleError(_ => Task.unit).sync()
-          } catch {
-            case _: Throwable => ()
-          }
-        }
-        m.iterator.map { case (k, buf) => k -> buf.toList }.toMap
-      }.guarantee(pullR.close.handleError(_ => Task.unit))
-    }
+        val k = f(r)
+        val buf = m.getOrElseUpdate(k, scala.collection.mutable.ListBuffer.empty[Return])
+        buf += r
+        m
+      }
+    }.map(_.iterator.map { case (k, buf) => k -> buf.toList }.toMap)
 
   /**
    * Appends another stream to this stream.
@@ -720,7 +669,6 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
     new Stream[T](
       task.flatMap { pullR =>
         that.task.map { pullT =>
-          // Prefer values from first, then second when first stops
           var firstDone = false
           pullR.transform { stepTask =>
             stepTask.map {
@@ -752,23 +700,17 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   /** Run `fin` exactly once when the stream terminates (success, empty) or is short-circuited by the consumer. */
   def onFinalize(fin: Task[Unit]): Stream[Return] = new Stream[Return](
     task.map { pullR =>
-      val fired = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val fired = new AtomicBoolean(false)
       pullR.transform { stepTask =>
-        Task {
-          try {
-            val next = stepTask.sync()
-            next match {
-              case Step.Stop if fired.compareAndSet(false, true) =>
-                fin.handleError(_ => Task.unit).sync()
-                Step.Stop
-              case other => other
-            }
-          } catch {
-            case t: Throwable =>
-              if (fired.compareAndSet(false, true)) {
-                fin.handleError(_ => Task.unit).sync()
-              }
-              throw t
+        stepTask.flatMap {
+          case Step.Stop if fired.compareAndSet(false, true) =>
+            fin.handleError(_ => Task.unit).map(_ => Step.Stop: Step[Return])
+          case other => Task.pure(other)
+        }.handleError { t =>
+          if (fired.compareAndSet(false, true)) {
+            fin.handleError(_ => Task.unit).flatMap(_ => Task.error(t))
+          } else {
+            Task.error(t)
           }
         }
       }
@@ -779,14 +721,8 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   def onErrorFinalize(fin: Throwable => Task[Unit]): Stream[Return] = new Stream[Return](
     task.map { pullR =>
       pullR.transform { stepTask =>
-        Task {
-          try {
-            stepTask.sync()
-          } catch {
-            case t: Throwable =>
-              fin(t).handleError(_ => Task.unit).sync()
-              throw t
-          }
+        stepTask.handleError { t =>
+          fin(t).handleError(_ => Task.unit).flatMap(_ => Task.error(t))
         }
       }
     }
@@ -795,7 +731,28 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   /**
    * Drains the stream and fully evaluates it.
    */
-  def drain: Task[Unit] = fold(())((_, _) => Task(()))
+  def drain: Task[Unit] = Task {
+    val pull = Task.quickEval(task)
+    val stack = new mutable.ArrayDeque[Pull[Return]]()
+    var current = pull
+    var done = false
+    try {
+      while (!done) {
+        Task.quickEval(current.pull) match {
+          case Step.Emit(_) => ()
+          case Step.Skip => ()
+          case Step.Stop =>
+            if (stack.isEmpty) done = true
+            else current = stack.removeLast()
+          case Step.Concat(inner) =>
+            stack.append(current)
+            current = inner
+        }
+      }
+    } finally {
+      try Task.quickEval(pull.close) catch { case _: Throwable => () }
+    }
+  }
 
   /**
    * Cycles through all results but only returns the last element. Will error if the Stream is empty.
@@ -820,39 +777,17 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    */
   def fold[T](initial: T)(f: (T, Return) => Task[T]): Task[T] =
     task.flatMap { pullR =>
-      Task.defer {
-        val stack = new java.util.ArrayDeque[Pull[Return]]()
-        var current: Pull[Return] = pullR
-        var acc = initial
-        var done = false
-        while (!done) {
-          val step = current.pull.sync()
-          step match {
-            case Step.Emit(r) =>
-              acc = f(acc, r).sync()
-            case Step.Skip => ()
-            case Step.Stop =>
-              if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) =>
-              stack.push(current); current = inner
+      def loop(current: Pull[Return], stack: List[Pull[Return]], acc: T): Task[T] =
+        current.pull.flatMap {
+          case Step.Emit(r) => f(acc, r).flatMap(newAcc => loop(current, stack, newAcc))
+          case Step.Skip => loop(current, stack, acc)
+          case Step.Stop => stack match {
+            case Nil => Task.pure(acc)
+            case hd :: tl => loop(hd, tl, acc)
           }
+          case Step.Concat(inner) => loop(inner, current :: stack, acc)
         }
-        // Close all pulls
-        try {
-          current.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-        while (!stack.isEmpty) {
-          val p0 = stack.pop()
-          try {
-            p0.close.handleError(_ => Task.unit).sync()
-          } catch {
-            case _: Throwable => ()
-          }
-        }
-        Task.pure(acc)
-      }.guarantee(pullR.close.handleError(_ => Task.unit))
+      loop(pullR, Nil, initial).guarantee(pullR.close.handleError(_ => Task.unit))
     }
 
   /**
@@ -925,108 +860,74 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
   /**
    * Grabs only the first element or None if the stream is empty.
    */
-  def firstOption: Task[Option[Return]] = task.flatMap { pullR =>
-    Task {
-      val stack = new java.util.ArrayDeque[Pull[Return]]()
-      var current: Pull[Return] = pullR
-      var result: Option[Return] = None
-      var done = false
-      while (!done && result.isEmpty) {
-        current.pull.sync() match {
-          case Step.Emit(r) => result = Some(r)
-          case Step.Skip => ()
-          case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-          case Step.Concat(inner) => stack.push(current); current = inner
+  def firstOption: Task[Option[Return]] =
+    task.flatMap { pullR =>
+      def loop(current: Pull[Return], stack: List[Pull[Return]]): Task[Option[Return]] =
+        current.pull.flatMap {
+          case Step.Emit(r) => Task.pure(Some(r))
+          case Step.Skip => loop(current, stack)
+          case Step.Stop => stack match {
+            case Nil => Task.pure(None)
+            case hd :: tl => loop(hd, tl)
+          }
+          case Step.Concat(inner) => loop(inner, current :: stack)
         }
-      }
-      try {
-        current.close.handleError(_ => Task.unit).sync()
-      } catch {
-        case _: Throwable => ()
-      }
-      while (!stack.isEmpty) {
-        val p0 = stack.pop()
-        try {
-          p0.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-      }
-      result
-    }.guarantee(pullR.close.handleError(_ => Task.unit))
-  }
+      loop(pullR, Nil).guarantee(pullR.close.handleError(_ => Task.unit))
+    }
 
   /**
    * Converts the stream to a list.
    *
    * @return a task that produces a list of the values in the stream
    */
-  def toList: Task[List[Return]] = {
-    task.flatMap { pullR =>
-      Task {
-        val builder = List.newBuilder[Return]
-        val stack = new java.util.ArrayDeque[Pull[Return]]()
-        var current: Pull[Return] = pullR
-        var done = false
-        while (!done) {
-          val step = current.pull.sync()
-          step match {
-            case Step.Emit(r) => builder += r
-            case Step.Skip => ()
-            case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) =>
-              stack.push(current); current = inner
-          }
+  def toList: Task[List[Return]] = Task {
+    val builder = List.newBuilder[Return]
+    val pull = Task.quickEval(task)
+    val stack = new mutable.ArrayDeque[Pull[Return]]()
+    var current = pull
+    var done = false
+    try {
+      while (!done) {
+        Task.quickEval(current.pull) match {
+          case Step.Emit(value) => builder += value.asInstanceOf[Return]
+          case Step.Skip => ()
+          case Step.Stop =>
+            if (stack.isEmpty) done = true
+            else current = stack.removeLast()
+          case Step.Concat(inner) =>
+            stack.append(current)
+            current = inner
         }
-        try {
-          current.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-        while (!stack.isEmpty) {
-          val p0 = stack.pop()
-          try {
-            p0.close.handleError(_ => Task.unit).sync()
-          } catch {
-            case _: Throwable => ()
-          }
-        }
-        builder.result()
-      }.guarantee(pullR.close.handleError(_ => Task.unit))
+      }
+    } finally {
+      try Task.quickEval(pull.close) catch { case _: Throwable => () }
     }
+    builder.result()
   }
 
-  def toVector: Task[Vector[Return]] = {
-    task.flatMap { pullR =>
-      Task {
-        val builder = Vector.newBuilder[Return]
-        val stack = new java.util.ArrayDeque[Pull[Return]]()
-        var current: Pull[Return] = pullR
-        var done = false
-        while (!done) {
-          current.pull.sync() match {
-            case Step.Emit(r) => builder += r
-            case Step.Skip => ()
-            case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-            case Step.Concat(inner) => stack.push(current); current = inner
-          }
+  def toVector: Task[Vector[Return]] = Task {
+    val builder = Vector.newBuilder[Return]
+    val pull = Task.quickEval(task)
+    val stack = new mutable.ArrayDeque[Pull[Return]]()
+    var current = pull
+    var done = false
+    try {
+      while (!done) {
+        Task.quickEval(current.pull) match {
+          case Step.Emit(value) => builder += value.asInstanceOf[Return]
+          case Step.Skip => ()
+          case Step.Stop =>
+            if (stack.isEmpty) done = true
+            else current = stack.removeLast()
+          case Step.Concat(inner) =>
+            stack.append(current)
+            current = inner
         }
-        try {
-          current.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-        while (!stack.isEmpty) {
-          val p0 = stack.pop()
-          try {
-            p0.close.handleError(_ => Task.unit).sync()
-          } catch {
-            case _: Throwable => ()
-          }
-        }
-        builder.result()
-      }.guarantee(pullR.close.handleError(_ => Task.unit))
+      }
+    } finally {
+      try Task.quickEval(pull.close) catch { case _: Throwable => () }
     }
+    builder.result()
   }
 
   /**
@@ -1034,35 +935,29 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    *
    * @return a `Task[Int]` representing the total number of entries evaluated
    */
-  def count: Task[Int] = task.flatMap { pullR =>
-    Task {
-      var cnt = 0
-      val stack = new java.util.ArrayDeque[Pull[Return]]()
-      var current: Pull[Return] = pullR
-      var done = false
+  def count: Task[Int] = Task {
+    val pull = Task.quickEval(task)
+    val stack = new mutable.ArrayDeque[Pull[Return]]()
+    var current = pull
+    var done = false
+    var cnt = 0
+    try {
       while (!done) {
-        current.pull.sync() match {
+        Task.quickEval(current.pull) match {
           case Step.Emit(_) => cnt += 1
           case Step.Skip => ()
-          case Step.Stop => if (stack.isEmpty) done = true else current = stack.pop()
-          case Step.Concat(inner) => stack.push(current); current = inner
+          case Step.Stop =>
+            if (stack.isEmpty) done = true
+            else current = stack.removeLast()
+          case Step.Concat(inner) =>
+            stack.append(current)
+            current = inner
         }
       }
-      try {
-        current.close.handleError(_ => Task.unit).sync()
-      } catch {
-        case _: Throwable => ()
-      }
-      while (!stack.isEmpty) {
-        val p0 = stack.pop()
-        try {
-          p0.close.handleError(_ => Task.unit).sync()
-        } catch {
-          case _: Throwable => ()
-        }
-      }
-      cnt
-    }.guarantee(pullR.close.handleError(_ => Task.unit))
+    } finally {
+      try Task.quickEval(pull.close) catch { case _: Throwable => () }
+    }
+    cnt
   }
 
   def par[T, R >: Return](maxThreads: Int = ParallelStream.DefaultMaxThreads,
@@ -1097,390 +992,37 @@ class Stream[+Return](private val task: Task[Pull[Return]]) extends AnyVal {
    * @return a `Task[Unit]` that completes when all elements are processed, or fails on the first error
    */
   def parForeach[R >: Return](threads: Int = ParallelStream.DefaultMaxThreads)
-                             (forge: Forge[R, Unit]): Task[Unit] = Task.defer {
-    val pull = task.sync()
-    @volatile var throwable = Option.empty[Throwable]
+                             (forge: Forge[R, Unit]): Task[Unit] =
+    task.flatMap { pull =>
+      @volatile var throwable = Option.empty[Throwable]
 
-    def puller: Task[Unit] = Task {
-      @tailrec
-      def recurse(current: Pull[R], stack: java.util.ArrayDeque[Pull[R]]): Unit = {
-        if (throwable.isEmpty) {
-          current.pull.sync() match {
-            case e: Step.Emit[_] =>
-              forge(e.value).handleError { t =>
-                throwable = Some(t)
-                Task.unit
-              }.sync()
-              recurse(current, stack)
-            case Step.Skip =>
-              recurse(current, stack)
-            case Step.Stop =>
-              if (!stack.isEmpty) {
-                recurse(stack.pop(), stack)
-              }
-            case c: Step.Concat[_] =>
-              stack.push(current)
-              recurse(c.pull, stack)
+      def recurse(current: Pull[R], stack: List[Pull[R]]): Task[Unit] = {
+        if (throwable.nonEmpty) Task.unit
+        else current.pull.flatMap {
+          case Step.Emit(e) =>
+            forge(e.asInstanceOf[R]).handleError { t =>
+              throwable = Some(t)
+              Task.unit
+            }.flatMap(_ => recurse(current, stack))
+          case Step.Skip => recurse(current, stack)
+          case Step.Stop => stack match {
+            case Nil => Task.unit
+            case hd :: tl => recurse(hd, tl)
           }
+          case Step.Concat(inner) => recurse(inner.asInstanceOf[Pull[R]], current :: stack)
         }
       }
 
-      recurse(pull.asInstanceOf[Pull[R]], new java.util.ArrayDeque[Pull[R]]())
+      val safeThreads = if (threads <= 0) 1 else threads
+      val tasks = (0 until safeThreads).toList.map { _ =>
+        recurse(pull.asInstanceOf[Pull[R]], Nil)
+      }
+
+      tasks.tasksPar.map { _ =>
+        throwable.foreach(throw _)
+      }.guarantee(pull.close.handleError(_ => Task.unit))
     }
 
-    val safeThreads = if (threads <= 0) 1 else threads
-    val tasks = (0 until safeThreads).toList.map { _ => puller }
-
-    tasks.tasksPar.map { _ =>
-      throwable.foreach(throw _)
-    }.guarantee(pull.close.handleError(_ => Task.unit))
-  }
-
-  def parFold[T](initial: T,
-                 threads: Int = ParallelStream.DefaultMaxThreads)
-                (f: (T, Return) => Task[T], merge: (T, T) => T): Task[T] = Task.defer {
-    val cells = new ConcurrentLinkedQueue[Holder[T]]()
-    val local = new ThreadLocal[Holder[T]] {
-      override def initialValue(): Holder[T] = {
-        val c = new Holder[T](initial)
-        cells.add(c)
-        c
-      }
-    }
-
-    parForeach(threads) { r =>
-      Task {
-        val c = local.get()
-        c.value = f(c.value, r).sync()
-      }
-    }.map { _ =>
-      var acc = initial
-      val it = cells.iterator()
-      while (it.hasNext) {
-        acc = merge(acc, it.next().value)
-      }
-      acc
-    }
-  }
 }
 
-object Stream {
-  /**
-   * Creates a stream with a Pull task
-   */
-  def apply[Return](pull: Task[Pull[Return]]): Stream[Return] = new Stream(pull)
-
-  /**
-   * Creates a stream with a variable number of entries
-   *
-   * @param values the variable number of entries
-   */
-  def apply[Return](values: Return*): Stream[Return] = emits(values)
-
-  /** Bracketed acquisition/usage/release for resources that back a Stream. */
-  def using[R, A](acquire: Task[R])(use: R => Stream[A])(release: R => Task[Unit]): Stream[A] =
-    new Stream[A](
-      Task {
-        val state = new java.util.concurrent.atomic.AtomicReference[Option[(R, Pull[A])]](None)
-        val released = new java.util.concurrent.atomic.AtomicBoolean(false)
-
-        def ensureRelease(r: R): Unit =
-          if (released.compareAndSet(false, true))
-            release(r).handleError(_ => Task.unit).sync()
-
-        // Build a pull that forwards steps and ensures release at termination/error
-        val base = Pull.fromFunction[Step[A]](() => Step.Skip) // placeholder, we'll transform below
-        val pull = base.transform { _ =>
-          Task {
-            val (r, p) = state.get() match {
-              case Some((r0, p0)) => (r0, p0)
-              case None =>
-                val r0 = acquire.sync()
-                val p0 = use(r0).task.sync()
-                state.set(Some((r0, p0)))
-                (r0, p0)
-            }
-            try {
-              val n = p.pull.sync()
-              n match {
-                case Step.Stop =>
-                  ensureRelease(r)
-                  Step.Stop
-                case other => other
-              }
-            } catch {
-              case t: Throwable =>
-                ensureRelease(r)
-                throw t
-            }
-          }
-        }
-        pull
-      }
-    )
-
-  /**
-   * Safely unfold a Stream-of-Streams without building recursive `append` / `Concat` chains.
-   *
-   * Why:
-   * - `Stream.append` switches streams by returning `Step.Concat(nextPull)`.
-   * - The Stream interpreter keeps prior pulls on a stack until the whole stream completes.
-   * - For paginated sources where each page holds a large in-memory buffer, recursive `append` can retain
-   *   every prior page and OOM.
-   *
-   * This helper iterates pages in a single Pull:
-   * - fetch page N
-   * - drain it
-   * - close it
-   * - fetch page N+1
-   */
-  def unfoldStreamEval[S, A](seed: S)(next: S => Task[Option[(Stream[A], S)]]): Stream[A] = Stream(
-    Task.defer {
-      val lock = new AnyRef
-
-      var state: S = seed
-      var currentPull: Pull[A] = Pull.fromList(Nil)
-      var currentPullInitialized: Boolean = false
-      var done: Boolean = false
-
-      def closeCurrentPull(): Unit = {
-        currentPull.close.attempt.sync()
-      }
-
-      def fetchNextPull(): Unit = {
-        // Close the previous pull before fetching the next to release references promptly.
-        closeCurrentPull()
-        next(state).sync() match {
-          case None =>
-            done = true
-            currentPull = Pull.fromList(Nil)
-          case Some((stream, nextState)) =>
-            state = nextState
-            currentPull = Stream.task(stream).sync()
-        }
-        currentPullInitialized = true
-      }
-
-      val pullTask: Task[Step[A]] = Task {
-        lock.synchronized {
-          @annotation.tailrec
-          def loop(): Step[A] = {
-            if (done) {
-              Step.Stop
-            } else {
-              if (!currentPullInitialized) {
-                fetchNextPull()
-              }
-
-              currentPull.pull.sync() match {
-                case e @ Step.Emit(_) => e
-                case Step.Skip => loop()
-                case Step.Concat(inner) =>
-                  // Allow inner concats within a page's pull.
-                  currentPull = inner
-                  loop()
-                case Step.Stop =>
-                  // Page drained. Fetch the next page.
-                  currentPullInitialized = false
-                  loop()
-              }
-            }
-          }
-
-          loop()
-        }
-      }
-
-      val closeTask: Task[Unit] = Task {
-        lock.synchronized {
-          done = true
-          closeCurrentPull()
-        }
-      }
-
-      Task.pure(Pull(pullTask, closeTask))
-    }
-  )
-
-  /** Managed-from-iterator with explicit release hook (always runs on termination/error). */
-  def fromIteratorManaged[A](mk: Task[Iterator[A]])(release: Iterator[A] => Task[Unit]): Stream[A] = {
-    using(mk) { it =>
-      apply(Task.pure(Pull.fromIterator(it)))
-    }(release)
-  }
-
-  /**
-   * Creates a stream that emits a single value.
-   *
-   * @param value the value to emit
-   * @tparam Return the type of the value
-   * @return a new stream that emits the value
-   */
-  def emit[Return](value: Return): Stream[Return] = apply(Task(Pull.fromList(List(value))))
-
-  /**
-   * Creates an empty stream.
-   *
-   * @tparam Return the type of the values in the stream
-   * @return a new empty stream
-   */
-  def empty[Return]: Stream[Return] = apply()
-
-  /**
-   * Creates a stream from a sequence of values.
-   *
-   * @param seq the sequence of values
-   * @tparam Return the type of the values
-   * @return a new stream that emits the values in the sequence
-   */
-  def emits[Return](seq: Seq[Return]): Stream[Return] = new Stream(Task(Pull.fromSeq(seq)))
-
-  /**
-   * Creates a stream from an iterator task.
-   *
-   * @param iterator the iterator task
-   * @tparam Return the type of the values
-   * @return a new stream that emits the values in the iterator
-   */
-  def fromIterator[Return](iterator: Task[Iterator[Return]]): Stream[Return] = fromIteratorManaged(iterator) {
-    case ac: AutoCloseable => Task(ac.close())
-    case _ => Task.unit
-  }
-
-  /**
-   * Forces a Task[Stream] into Stream
-   */
-  def force[Return](stream: Task[Stream[Return]]): Stream[Return] = new Stream[Return](stream.flatMap(_.task))
-
-  /**
-   * Merges an Iterator of Streams together into one lazily loading Stream
-   */
-  def merge[Return](streams: Task[Pull[Stream[Return]]]): Stream[Return] =
-    new Stream[Return](
-      streams.map { outerPull =>
-        val innerQueue = new java.util.concurrent.ConcurrentLinkedQueue[() => Pull[Return]]()
-        Pull.fromFunction[Return]({ () =>
-          val thunk = innerQueue.poll()
-          if (thunk != null) {
-            Step.Concat(thunk())
-          } else {
-            outerPull.pull.sync() match {
-              case Step.Emit(stream) =>
-                innerQueue.offer(() => stream.task.sync())
-                Step.Skip
-              case Step.Skip => Step.Skip
-              case Step.Concat(inner) =>
-                Step.Concat(inner.asInstanceOf[Pull[Return]])
-              case Step.Stop =>
-                val t2 = innerQueue.poll()
-                if (t2 == null) {
-                  Step.Stop
-                } else {
-                  Step.Concat(t2())
-                }
-            }
-          }
-        }, outerPull.close)
-      }
-    )
-
-  /**
-   * Creates a Byte stream from the NIO Path
-   *
-   * @param path the path to the file
-   * @return a new stream that emits Bytes
-   */
-  def fromPath(path: Path): Stream[Byte] = fromFile(path.toFile)
-
-  /**
-   * Convenience functionality to list the contents of a directory Path. This is extremely fast and efficient, but does
-   * not guarantee sort order.
-   */
-  def listDirectory(directory: Path): Stream[Path] = Stream.force(Task {
-    val ds = Files.newDirectoryStream(directory)
-    val closed = new AtomicBoolean(false)
-
-    def closeOnce(): Unit = if (closed.compareAndSet(false, true)) ds.close()
-
-    val baseIt = ds.iterator().asScala
-
-    val it: Iterator[Path] = new Iterator[Path] {
-      override def hasNext: Boolean = {
-        val hn = baseIt.hasNext
-        if (!hn) closeOnce()
-        hn
-      }
-
-      override def next(): Path = baseIt.next()
-    }
-
-    Stream
-      .fromIterator(Task.pure(it))
-      .onFinalize(Task(closeOnce()))
-  })
-
-  /**
-   * Convenience functionality to list the contents of a directory Path, but applies a sort to the listing.
-   *
-   * Use NaturalKey.of for a reliable sort that detects full numbers and blocks.
-   *
-   * NOTE: This actually loads the entire list into memory to sort it. Prefer the unsorted variation if loading giant
-   * lists of files.
-   */
-  def listDirectory[B](directory: Path, sortBy: Path => B)
-                      (implicit ordering: Ordering[B]): Stream[Path] = rapid.Stream.force(Task {
-    val ds = Files.newDirectoryStream(directory)
-    try {
-      val list = ds.iterator().asScala.toList.sortBy(sortBy)(ordering)
-      Stream.emits(list)
-    } finally {
-      ds.close()
-    }
-  })
-
-  /**
-   * Creates a Byte stream from the Java File
-   *
-   * @param file the file to load
-   * @return a new stream that emits Bytes
-   */
-  def fromFile(file: File): Stream[Byte] = fromInputStream(Task(new BufferedInputStream(new FileInputStream(file))))
-
-  /**
-   * Creates a Byte stream from the InputStream task
-   *
-   * @param input      the InputStream task
-   * @param bufferSize the buffer size internally to use for the InputStream. Defaults to 1024.
-   * @return a new stream that emits Bytes
-   */
-  def fromInputStream(input: Task[InputStream], bufferSize: Int = 1024): Stream[Byte] =
-    new Stream[Byte](input.map { is =>
-      val lock = new AnyRef
-      val buf = new Array[Byte](bufferSize)
-      var pos = 0
-      var len = 0
-
-      Pull.fromFunction[Byte]({ () =>
-        lock.synchronized {
-          if (pos >= len) {
-            len = is.read(buf)
-            pos = 0
-          }
-          if (len < 0) {
-            Step.Stop
-          } else {
-            val b = buf(pos)
-            pos += 1
-            Step.Emit(b)
-          }
-        }
-      }, Task {
-        try is.close()
-        catch {
-          case _: Throwable => ()
-        }
-      })
-    })
-
-  def task[Return](stream: Stream[Return]): Task[Pull[Return]] = stream.task
-}
+object Stream extends StreamCompanion with StreamPlatformCompanion

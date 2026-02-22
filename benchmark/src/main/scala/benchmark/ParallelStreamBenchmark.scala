@@ -4,7 +4,7 @@ import cats.effect.kernel.{Deferred, Fiber, Poll, Ref, Unique}
 import cats.effect.{Concurrent, IO}
 import cats.effect.unsafe.implicits.global
 import org.openjdk.jmh.annotations._
-import rapid.Task
+import rapid.*
 import rapid.cats._
 import rapid.trace.Trace
 
@@ -35,17 +35,38 @@ class ParallelStreamBenchmark {
   }
 
   @Benchmark
-  def rapidParallelStreamToList(): List[Int] = {
+  def rapidVirtualParallelStreamToList(): List[Int] = {
+    Task.Virtual = true
     verify(rapidStream.par(32)(Task.pure(_)).toList.sync())
   }
 
   @Benchmark
-  def rapidParallelStreamFilter(): List[Int] = {
+  def rapidFixedParallelStreamToList(): List[Int] = {
+    Task.Virtual = false
+    verify(rapidStream.par(32)(Task.pure(_)).toList.sync())
+  }
+
+  @Benchmark
+  def rapidVirtualParallelStreamFilter(): List[Int] = {
+    Task.Virtual = true
     verify(rapidStream.filter(_ % 2 == 0).par(8)(Task.pure(_)).toList.sync(), size / 2)
   }
 
   @Benchmark
-  def rapidParallelStreamMap(): List[Int] = {
+  def rapidFixedParallelStreamFilter(): List[Int] = {
+    Task.Virtual = false
+    verify(rapidStream.filter(_ % 2 == 0).par(8)(Task.pure(_)).toList.sync(), size / 2)
+  }
+
+  @Benchmark
+  def rapidVirtualParallelStreamMap(): List[Int] = {
+    Task.Virtual = true
+    verify(rapidStream.par(32)(i => Task(i * 2)).toList.sync())
+  }
+
+  @Benchmark
+  def rapidFixedParallelStreamMap(): List[Int] = {
+    Task.Virtual = false
     verify(rapidStream.par(32)(i => Task(i * 2)).toList.sync())
   }
 
@@ -55,7 +76,8 @@ class ParallelStreamBenchmark {
   }
 
   @Benchmark
-  def rapidParForeach(): Long = {
+  def rapidVirtualParForeach(): Long = {
+    Task.Virtual = true
     // Effect-only: side-effect into an AtomicLong, no allocation of results
     val add = new AtomicLong(0L)
     rapidStream.parForeach(32) { i =>
@@ -70,7 +92,24 @@ class ParallelStreamBenchmark {
   }
 
   @Benchmark
-  def rapidParFoldSum(): Long = {
+  def rapidFixedParForeach(): Long = {
+    Task.Virtual = false
+    // Effect-only: side-effect into an AtomicLong, no allocation of results
+    val add = new AtomicLong(0L)
+    rapidStream.parForeach(32) { i =>
+      add.addAndGet(i.toLong)
+      Task.unit
+    }.sync()
+    val s = add.get()
+    // Verify correctness: sum(1..size)
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected, s"parForeach sum $s != expected $expected")
+    s
+  }
+
+  @Benchmark
+  def rapidVirtualParFoldSum(): Long = {
+    Task.Virtual = true
     val s = rapidStream
       .parFold(0L, threads = 32)((acc, r) => Task.pure(acc + r.toLong), _ + _)
       .sync()
@@ -80,7 +119,31 @@ class ParallelStreamBenchmark {
   }
 
   @Benchmark
-  def rapidParallelStreamFoldSum(): Long = {
+  def rapidFixedParFoldSum(): Long = {
+    Task.Virtual = false
+    val s = rapidStream
+      .parFold(0L, threads = 32)((acc, r) => Task.pure(acc + r.toLong), _ + _)
+      .sync()
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected, s"parFold sum $s != expected $expected")
+    s
+  }
+
+  @Benchmark
+  def rapidVirtualParallelStreamFoldSum(): Long = {
+    Task.Virtual = true
+    val s = rapidStream
+      .par(maxThreads = 32) { i => Task.pure(i) }
+      .fold(0L) { (acc, r) => Task.pure(acc + r.toLong) }
+      .sync()
+    val expected = (size.toLong * (size.toLong + 1L)) / 2L
+    assert(s == expected, s"parallelStreamFold sum $s != expected $expected")
+    s
+  }
+
+  @Benchmark
+  def rapidFixedParallelStreamFoldSum(): Long = {
+    Task.Virtual = false
     val s = rapidStream
       .par(maxThreads = 32) { i => Task.pure(i) }
       .fold(0L) { (acc, r) => Task.pure(acc + r.toLong) }
@@ -92,7 +155,7 @@ class ParallelStreamBenchmark {
 
   @Benchmark
   def fs2ParEvalMapSum(): Long = {
-    import cats.effect.IO
+    import _root_.cats.effect.IO
     val ref = new java.util.concurrent.atomic.AtomicLong(0L)
     fs2Stream.parEvalMap(32) { i =>
       IO { ref.addAndGet(i.toLong) }

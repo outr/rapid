@@ -34,14 +34,16 @@ object Unique extends Unique(UniqueDefaults.length, UniqueDefaults.characters, U
    *
    * 32 characters of unique hexadecimal values with dashes representing 36 total characters
    */
-  def uuid: Task[String] = Task {
-    val a = modify(length = 8, characters = Hexadecimal).sync()
-    val b = modify(length = 4, characters = Hexadecimal).sync()
-    val c = modify(length = 3, characters = Hexadecimal).sync()
-    val d = modify(length = 1, characters = "89ab").sync()
-    val e = modify(length = 3, characters = Hexadecimal).sync()
-    val f = modify(length = 12, characters = Hexadecimal).sync()
-    s"$a-$b-4$c-$d$e-$f"
+  def uuid: Task[String] = {
+    val hex = Hexadecimal
+    for {
+      a <- modify(length = 8, characters = hex)
+      b <- modify(length = 4, characters = hex)
+      c <- modify(length = 3, characters = hex)
+      d <- modify(length = 1, characters = "89ab")
+      e <- modify(length = 3, characters = hex)
+      f <- modify(length = 12, characters = hex)
+    } yield s"$a-$b-4$c-$d$e-$f"
   }
 
   /**

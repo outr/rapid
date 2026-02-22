@@ -15,8 +15,8 @@ trait RapidPackage {
   implicit def intStream(stream: Stream[Int]): IntStreamOps = IntStreamOps(stream)
 
   implicit final class FiberOps[+A](private val fiber: Fiber[A]) {
-    def map[B](f: A => B): Task[B] = Task(f(fiber.sync()))
-    def flatMap[B](f: A => Task[B]): Task[B] = f(fiber.sync())
+    def map[B](f: A => B): Task[B] = fiber.join.map(f)
+    def flatMap[B](f: A => Task[B]): Task[B] = fiber.join.flatMap(f)
     def cancel: Task[Boolean] = Task.pure(false)
   }
 }

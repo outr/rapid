@@ -66,7 +66,7 @@ final class BoundedMPMCQueue[A](capacity: Int) {
         return false
       } else {
         // The cell is not yet ready for use; yield and retry.
-        Thread.`yield`()
+        Platform.yieldNow()
       }
     }
     // Unreachable
@@ -101,7 +101,7 @@ final class BoundedMPMCQueue[A](capacity: Int) {
         return None
       } else {
         // The cell is in the process of being updated; yield and retry.
-        Thread.`yield`()
+        Platform.yieldNow()
       }
     }
     // Unreachable

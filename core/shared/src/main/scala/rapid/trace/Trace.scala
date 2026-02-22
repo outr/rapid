@@ -7,16 +7,22 @@ trait Trace {
 }
 
 object Trace {
-  @volatile var Enabled: Boolean = true
+  var Enabled: Boolean = true
 
   object empty extends Trace {
     override def toSTE: Option[StackTraceElement] = None
   }
 
-  def apply(file: File, line: Line, enclosing: Enclosing): Trace = if (Enabled) {
-    SourcecodeTrace(file, line, enclosing)
+  def apply(file: File, line: Line, enclosing: Enclosing, kind: String): Trace = if (Enabled) {
+    SourcecodeTrace(file, line, enclosing, kind)
   } else {
     empty
+  }
+
+  private def isInterpreterFrame(ste: StackTraceElement): Boolean = {
+    val cls = ste.getClassName
+    cls.startsWith("rapid.fiber.SynchronousFiber") ||
+      cls.startsWith("rapid.fiber.FixedThreadPoolFiber")
   }
 
   def update(throwable: Throwable, traceList: List[Trace]): Throwable = {
@@ -24,13 +30,15 @@ object Trace {
       val original = throwable.getStackTrace
       val tasks = traceList.flatMap(_.toSTE).toArray
 
-      val first = original(0)
-      val ste = new Array[StackTraceElement](original.length + tasks.length)
-      ste(0) = first
-      System.arraycopy(tasks, 0, ste, 1, tasks.length)
-      System.arraycopy(original, 1, ste, tasks.length + 1, original.length - 1)
-
-      throwable.setStackTrace(ste)
+      if (original.nonEmpty && tasks.nonEmpty) {
+        val first = original(0)
+        val rest = original.drop(1).filterNot(isInterpreterFrame)
+        val ste = new Array[StackTraceElement](1 + tasks.length + rest.length)
+        ste(0) = first
+        System.arraycopy(tasks, 0, ste, 1, tasks.length)
+        System.arraycopy(rest, 0, ste, 1 + tasks.length, rest.length)
+        throwable.setStackTrace(ste)
+      }
     }
     throwable
   }

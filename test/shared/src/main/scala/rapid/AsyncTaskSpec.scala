@@ -2,44 +2,31 @@ package rapid
 
 import org.scalatest.Assertion
 
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 import scala.language.implicitConversions
 import scala.util.{Failure, Success}
 
-trait AsyncTaskSpec {
+trait AsyncTaskSpec extends org.scalatest.AsyncTestSuite {
   /** Default per-test timeout to prevent hanging specs. */
   implicit protected val testTimeout: FiniteDuration = 1.minute
 
-  implicit def task2Future[Return](task: Task[Return])
-                                  (implicit ec: scala.concurrent.ExecutionContext): Future[Return] = {
+  override implicit def executionContext: ExecutionContext = Platform.executionContext
+
+  implicit def task2Future[Return](task: Task[Return]): Future[Return] = {
     val p = Promise[Return]()
 
-    // Run the blocking sync on a daemon thread to avoid blocking the ScalaTest serial EC
-    val runnable = new Runnable {
-      override def run(): Unit = {
-        try p.trySuccess(task.sync())
-        catch {
-          case th: Throwable => p.tryFailure(th)
-        }
-      }
+    val fiber = Platform.createFiber(task)
+    fiber.onComplete {
+      case Success(v) => p.trySuccess(v)
+      case Failure(t) => p.tryFailure(t)
     }
-    val t = new Thread(runnable, "rapid-test-sync")
-    t.setDaemon(true)
-    t.start()
 
-    // Fails the promise if it takes too long
-    val timer = new java.util.Timer(true)
-    val timerTask = new java.util.TimerTask {
-      override def run(): Unit = p.tryFailure(new java.util.concurrent.TimeoutException("Async test timed out"))
+    Platform.scheduleDelay(testTimeout.toMillis) { () =>
+      p.tryFailure(new java.util.concurrent.TimeoutException("Async test timed out"))
     }
-    timer.schedule(timerTask, testTimeout.toMillis)
 
-    p.future.andThen {
-      case _ =>
-        timerTask.cancel()
-        timer.cancel()
-    }(ec)
+    p.future
   }
 
   implicit class TaskTestExtras[Return](task: Task[Return]) {
