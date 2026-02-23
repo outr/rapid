@@ -36,22 +36,22 @@ Take a look at the benchmarks to see how well it performs compared to the altern
 
 ### Core
 ```scala
-libraryDependencies += "com.outr" %% "rapid-core" % "2.7.0"
+libraryDependencies += "com.outr" %% "rapid-core" % "2.7.1"
 ```
 
 ### Scribe (Effects for Logging)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-scribe" % "2.7.0"
+libraryDependencies += "com.outr" %% "rapid-scribe" % "2.7.1"
 ```
 
 ### Test (Test features for running Task effects in ScalaTest)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-test" % "2.7.0"
+libraryDependencies += "com.outr" %% "rapid-test" % "2.7.1"
 ```
 
 ### Cats (Interoperability with Cats-Effect)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-cats" % "2.7.0"
+libraryDependencies += "com.outr" %% "rapid-cats" % "2.7.1"
 ```
 
 ---
@@ -70,7 +70,7 @@ val hello: Task[Unit] = Task {
   println("Hello, Rapid!")
 }
 // hello: Task[Unit] = Suspend(
-//   f = repl.MdocSession$MdocApp$$Lambda/0x000000007f8b9000@5659cd96,
+//   f = repl.MdocSession$MdocApp$$Lambda/0x0000000008890000@5659cd96,
 //   trace = SourcecodeTrace(
 //     file = File("README.md"),
 //     line = Line(15),
@@ -84,7 +84,7 @@ val delayed: Task[String] =
 // delayed: Task[String] = FlatMap(
 //   input = FlatMap(
 //     input = Unit,
-//     f = rapid.Task$$Lambda/0x000000007f8c1e88@5d0c18bf,
+//     f = rapid.Task$$Lambda/0x0000000008895e88@5d0c18bf,
 //     trace = SourcecodeTrace(
 //       file = File("README.md"),
 //       line = Line(20),
@@ -92,7 +92,7 @@ val delayed: Task[String] =
 //       kind = "flatMap"
 //     )
 //   ),
-//   f = rapid.Task$$Lambda/0x000000007f8c2a30@76267df0,
+//   f = rapid.Task$$Lambda/0x0000000008896a30@76267df0,
 //   trace = SourcecodeTrace(
 //     file = File("README.md"),
 //     line = Line(20),
@@ -268,7 +268,7 @@ val t = Task {
   else throw new RuntimeException("boom")
 }
 // t: Task[String] = Suspend(
-//   f = repl.MdocSession$MdocApp$$Lambda/0x000000007f8e3318@3e8c9b76,
+//   f = repl.MdocSession$MdocApp$$Lambda/0x00000000088b3bf0@3e8c9b76,
 //   trace = SourcecodeTrace(
 //     file = File("README.md"),
 //     line = Line(180),
@@ -281,7 +281,7 @@ t.attempt.sync() match {
   case scala.util.Success(v) => println(s"Success: $v")
   case scala.util.Failure(e) => println(s"Error: ${e.getMessage}")
 }
-// Success: ok
+// Error: boom
 ```
 
 ---

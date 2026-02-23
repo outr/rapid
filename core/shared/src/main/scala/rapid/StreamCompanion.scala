@@ -18,6 +18,8 @@ trait StreamCompanion {
    * @param values the variable number of entries
    */
   def apply[Return](values: Return*): Stream[Return] = emits(values)
+  
+  def task[R](stream: Stream[R]): Task[Pull[R]] = stream.task
 
   /** Bracketed acquisition/usage/release for resources that back a Stream. */
   def using[R, A](acquire: Task[R])(use: R => Stream[A])(release: R => Task[Unit]): Stream[A] =
