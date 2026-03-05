@@ -5,7 +5,7 @@ import scala.util.{Failure, Success, Try}
 /**
  * Provides convenience functionality for running an application as a Task
  */
-trait RapidApp {
+trait RapidApp extends RapidLoggerSupport {
   def main(args: Array[String]): Unit = {
     run(args.toList).attempt.flatMap(result).sync()
   }
@@ -14,6 +14,6 @@ trait RapidApp {
 
   def result(result: Try[Unit]): Task[Unit] = result match {
     case Success(_) => Task.unit
-    case Failure(t) => Task(t.printStackTrace())
+    case Failure(t) => error(t)
   }
 }

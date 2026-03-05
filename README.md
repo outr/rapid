@@ -39,11 +39,6 @@ Take a look at the benchmarks to see how well it performs compared to the altern
 libraryDependencies += "com.outr" %% "rapid-core" % "2.7.1"
 ```
 
-### Scribe (Effects for Logging)
-```scala
-libraryDependencies += "com.outr" %% "rapid-scribe" % "2.7.1"
-```
-
 ### Test (Test features for running Task effects in ScalaTest)
 ```scala
 libraryDependencies += "com.outr" %% "rapid-test" % "2.7.1"

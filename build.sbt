@@ -9,7 +9,7 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "2.7.1"
+ThisBuild / version := "2.8.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.2"
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
 
@@ -43,7 +43,7 @@ ThisBuild / Test / logBuffered := false
 
 val sourcecodeVersion: String = "0.4.4"
 
-val scribeVersion: String = "3.17.0"
+val scribeVersion: String = "3.18.0"
 
 /// Testing and Benchmarking Libraries
 
@@ -61,6 +61,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     name := s"$projectName-core",
     libraryDependencies ++= Seq(
       "com.lihaoyi" %%% "sourcecode" % sourcecodeVersion,
+      "com.outr" %%% "scribe" % scribeVersion,
       "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
     ),
     Compile / unmanagedSourceDirectories ++= {
@@ -85,17 +86,6 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     Compile / nativeConfig ~= { _.withLTO(scala.scalanative.build.LTO.thin) },
     Test / nativeConfig ~= { _.withLTO(scala.scalanative.build.LTO.none) },
     Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "jvmNative" / "src" / "test" / "scala"
-  )
-
-lazy val scribe = crossProject(JVMPlatform)
-  .crossType(CrossType.Full)
-  .dependsOn(core)
-  .settings(
-    name := s"$projectName-scribe",
-    libraryDependencies ++= Seq(
-      "com.outr" %%% "scribe" % scribeVersion,
-      "org.scalatest" %%% "scalatest" % scalaTestVersion % Test
-    )
   )
 
 lazy val test = crossProject(JVMPlatform, JSPlatform, NativePlatform)
@@ -139,7 +129,7 @@ lazy val benchmark = project.in(file("benchmark"))
 
 lazy val docs = project
   .in(file("documentation"))
-  .dependsOn(core.jvm, scribe.jvm, cats.jvm, test.jvm)
+  .dependsOn(core.jvm, cats.jvm, test.jvm)
   .enablePlugins(MdocPlugin)
   .settings(
     mdocVariables := Map(
@@ -149,7 +139,7 @@ lazy val docs = project
   )
 
 lazy val root = project.in(file("."))
-  .aggregate(core.jvm, core.js, core.native, scribe.jvm, test.jvm, test.js, test.native, cats.jvm)
+  .aggregate(core.jvm, core.js, core.native, test.jvm, test.js, test.native, cats.jvm)
   .settings(
     name := projectName,
     publish := {},
