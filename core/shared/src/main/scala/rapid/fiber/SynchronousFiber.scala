@@ -66,8 +66,16 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
     while (stack.nonEmpty) {
       stack.removeLast() match {
         case ErrorHandlerMarker(handler, _) =>
-          stack.append(handler(t))
-          return true
+          try {
+            stack.append(handler(t))
+            return true
+          } catch {
+            case _: MatchError =>
+              // Partial function didn't match — continue searching for another handler
+            case handlerError: Throwable =>
+              // Handler itself threw — treat as unhandled, propagate original error
+              return false
+          }
         case _ =>
       }
     }

@@ -7,13 +7,14 @@ import scala.util.{Failure, Success, Try}
  */
 trait RapidApp extends RapidLoggerSupport {
   def main(args: Array[String]): Unit = {
-    run(args.toList).attempt.flatMap(result).sync()
+    val exitCode = run(args.toList).attempt.flatMap(result).sync()
+    if (exitCode != 0) sys.exit(exitCode)
   }
 
   def run(args: List[String]): Task[Unit]
 
-  def result(result: Try[Unit]): Task[Unit] = result match {
-    case Success(_) => Task.unit
-    case Failure(t) => error(t)
+  def result(result: Try[Unit]): Task[Int] = result match {
+    case Success(_) => Task.pure(0)
+    case Failure(t) => error(t).map(_ => 1)
   }
 }
