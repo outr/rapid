@@ -36,17 +36,17 @@ Take a look at the benchmarks to see how well it performs compared to the altern
 
 ### Core
 ```scala
-libraryDependencies += "com.outr" %% "rapid-core" % "2.8.0"
+libraryDependencies += "com.outr" %% "rapid-core" % "2.9.0"
 ```
 
 ### Test (Test features for running Task effects in ScalaTest)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-test" % "2.8.0"
+libraryDependencies += "com.outr" %% "rapid-test" % "2.9.0"
 ```
 
 ### Cats (Interoperability with Cats-Effect)
 ```scala
-libraryDependencies += "com.outr" %% "rapid-cats" % "2.8.0"
+libraryDependencies += "com.outr" %% "rapid-cats" % "2.9.0"
 ```
 
 ---
@@ -65,7 +65,7 @@ val hello: Task[Unit] = Task {
   println("Hello, Rapid!")
 }
 // hello: Task[Unit] = Suspend(
-//   f = repl.MdocSession$MdocApp$$Lambda/0x00000000428a4000@61b92fa8,
+//   f = repl.MdocSession$MdocApp$$Lambda/0x00000000798f0000@2cba0c68,
 //   trace = SourcecodeTrace(
 //     file = File("README.md"),
 //     line = Line(15),
@@ -79,7 +79,7 @@ val delayed: Task[String] =
 // delayed: Task[String] = FlatMap(
 //   input = FlatMap(
 //     input = Unit,
-//     f = rapid.Task$$Lambda/0x00000000428a79b8@2d01a535,
+//     f = rapid.Task$$Lambda/0x00000000798f60a0@29e99b0d,
 //     trace = SourcecodeTrace(
 //       file = File("README.md"),
 //       line = Line(20),
@@ -87,7 +87,7 @@ val delayed: Task[String] =
 //       kind = "flatMap"
 //     )
 //   ),
-//   f = rapid.Task$$Lambda/0x00000000428ac598@77d6cf9e,
+//   f = rapid.Task$$Lambda/0x00000000798f6c48@3ea6b8b8,
 //   trace = SourcecodeTrace(
 //     file = File("README.md"),
 //     line = Line(20),
@@ -115,7 +115,7 @@ val fiber = Task {
   Thread.sleep(1000)
   "Completed!"
 }.start()
-// fiber: Fiber[String] = rapid.fiber.VirtualThreadFiber@670067f6
+// fiber: Fiber[String] = rapid.fiber.VirtualThreadFiber@1742d500
 
 println("Running in background...")
 // Running in background...
@@ -135,7 +135,7 @@ You can transform it sequentially or in parallel.
 import rapid.{Stream, Task}
 
 val s = Stream.emits(1 to 5)
-// s: Stream[Int] = rapid.Stream@1898ffc4
+// s: Stream[Int] = rapid.Stream@51f591ba
 
 val doubled = s.map(_ * 2).toList.sync()
 // doubled: List[Int] = List(2, 4, 6, 8, 10)
@@ -227,7 +227,7 @@ streamResult // 5050
 import rapid.{Stream, ParallelStream, Task}
 
 val base = Stream.emits(1 to 10)
-// base: Stream[Int] = rapid.Stream@1aaf1576
+// base: Stream[Int] = rapid.Stream@1a12175d
 val ps   = ParallelStream(
   stream = base,
   forge  = (i: Int) => Task.pure(if (i % 2 == 0) Some(i * 10) else None),
@@ -235,8 +235,8 @@ val ps   = ParallelStream(
   maxBuffer  = 100000
 )
 // ps: ParallelStream[Int, Int] = ParallelStream(
-//   stream = rapid.Stream@1aaf1576,
-//   forge = repl.MdocSession$MdocApp$$anon$25@db84225,
+//   stream = rapid.Stream@1a12175d,
+//   forge = repl.MdocSession$MdocApp$$anon$25@409abd57,
 //   maxThreads = 8,
 //   maxBuffer = 100000
 // )
@@ -263,7 +263,7 @@ val t = Task {
   else throw new RuntimeException("boom")
 }
 // t: Task[String] = Suspend(
-//   f = repl.MdocSession$MdocApp$$Lambda/0x0000000042907318@6233c2a0,
+//   f = repl.MdocSession$MdocApp$$Lambda/0x00000000799206c8@74b4a0c6,
 //   trace = SourcecodeTrace(
 //     file = File("README.md"),
 //     line = Line(180),
@@ -276,7 +276,7 @@ t.attempt.sync() match {
   case scala.util.Success(v) => println(s"Success: $v")
   case scala.util.Failure(e) => println(s"Error: ${e.getMessage}")
 }
-// Error: boom
+// Success: ok
 ```
 
 ---
