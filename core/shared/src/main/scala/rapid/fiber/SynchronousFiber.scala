@@ -112,21 +112,10 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
             case Some(Failure(t)) =>
               throw t
             case None =>
-              if (Platform.isVirtualThread) {
-                val lock = new AnyRef
-                @volatile var done = false
-                c.onComplete { _ => lock.synchronized { done = true; lock.notifyAll() } }
-                lock.synchronized { while (!done) lock.wait() }
-                c.result.get match {
-                  case Success(v) => previous = v
-                  case Failure(t) => throw t
-                }
-              } else {
-                suspended = true
-                c.onComplete {
-                  case Success(v) => resume(v)
-                  case Failure(t) => resumeWithError(t)
-                }
+              suspended = true
+              c.onComplete {
+                case Success(v) => resume(v)
+                case Failure(t) => resumeWithError(t)
               }
           }
         case HandleError(inner, handler, tr) =>
