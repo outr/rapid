@@ -99,12 +99,7 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
                   if (tracing) lastTrace = tr
                   continue = false
                   val ms = duration.toMillis
-                  if (ms >= 1000L) {
-                    val deadline = System.currentTimeMillis() + ms
-                    SleepScheduler.schedule(deadline, resumeRunnable)
-                  } else {
-                    FixedThreadPoolFiber.scheduler.schedule(resumeRunnable, ms, TimeUnit.MILLISECONDS)
-                  }
+                  FixedThreadPoolFiber.scheduler.schedule(resumeRunnable, ms, TimeUnit.MILLISECONDS)
                   previous = ()
                 case c: Completable[_] =>
                   if (tracing) lastTrace = c.trace

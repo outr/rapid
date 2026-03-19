@@ -49,7 +49,7 @@ object Unique extends Unique(UniqueDefaults.length, UniqueDefaults.characters, U
   /**
    * Returns the number of possible values for a specific length and characters.
    */
-  def poolSize(length: Int = 32, characters: String = AllLettersAndNumbers): Task[Long] = Task {
-    math.pow(characters.length, length).toLong
+  def poolSize(length: Int = 32, characters: String = AllLettersAndNumbers): Task[BigInt] = Task {
+    BigInt(characters.length).pow(length)
   }
 }

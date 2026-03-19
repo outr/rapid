@@ -478,6 +478,19 @@ class Stream[+Return](private[rapid] val task: Task[Pull[Return]]) {
     })
   }
 
+  def timeout(duration: FiniteDuration): Stream[Return] = new Stream[Return](task.map { pullR =>
+    val deadline = System.currentTimeMillis() + duration.toMillis
+    pullR.transform { stepTask =>
+      Task.defer {
+        if (System.currentTimeMillis() >= deadline) {
+          Task.error(new java.util.concurrent.TimeoutException(s"Stream timed out after $duration"))
+        } else {
+          stepTask
+        }
+      }
+    }
+  })
+
   def guarantee(task: Task[Unit]): Stream[Return] = new Stream[Return](this.task.map { pull =>
     pull.onClose(task)
   })

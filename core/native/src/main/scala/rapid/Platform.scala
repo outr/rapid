@@ -2,6 +2,7 @@ package rapid
 
 import rapid.fiber.SynchronousFiber
 
+import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 import scala.concurrent.ExecutionContext
 
 object Platform extends RapidPlatform {
@@ -15,7 +16,7 @@ object Platform extends RapidPlatform {
   override def isVirtualThread: Boolean = false
   override def delay(millis: Long): Unit = Thread.sleep(millis)
 
-  override def runAsync(task: Task[_]): Unit =
+  override def runAsync(task: Task[?]): Unit =
     executionContext.execute(() => { createFiber(task); () })
 
   override def yieldNow(): Unit = Thread.`yield`()
@@ -52,16 +53,15 @@ object Platform extends RapidPlatform {
   override def schedule(thunk: () => Unit): Unit =
     executionContext.execute(() => thunk())
 
+  private lazy val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor(r => {
+    val t = new Thread(r, "rapid-native-scheduler")
+    t.setDaemon(true)
+    t
+  })
+
   override def scheduleDelay(millis: Long)(thunk: () => Unit): Unit = {
     if (millis <= 0) schedule(thunk)
-    else {
-      val thread = new Thread(() => {
-        Thread.sleep(millis)
-        thunk()
-      })
-      thread.setDaemon(true)
-      thread.start()
-    }
+    else scheduler.schedule((() => thunk()): Runnable, millis, TimeUnit.MILLISECONDS)
   }
 
   override def awaitFiber[R](fiber: Fiber[R]): R = fiber match {
