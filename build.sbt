@@ -53,7 +53,7 @@ val fs2Version: String = "3.13.0"
 
 val scalaJsMacrotaskVersion: String = "1.1.1"
 
-val scalaTestVersion: String = "3.2.19"
+val scalaTestVersion: String = "3.2.20"
 
 lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Full)
