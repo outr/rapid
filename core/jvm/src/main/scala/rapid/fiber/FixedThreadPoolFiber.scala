@@ -55,13 +55,17 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
     private def collectTraces(): List[Trace] = {
       val seen = new scala.collection.mutable.LinkedHashSet[Trace]
       if (lastTrace != Trace.empty) seen += lastTrace
-      val it = stack.descendingIterator()
-      while (it.hasNext) {
-        it.next() match {
+      // Snapshot the stack to avoid ConcurrentModificationException from concurrent mutation
+      // (resume() can schedule execution on another thread, which modifies the stack).
+      val snapshot = stack.toArray
+      var i = snapshot.length - 1
+      while (i >= 0) {
+        snapshot(i) match {
           case tr: Trace if tr != Trace.empty => seen += tr
           case ErrorHandlerMarker(_, tr) if tr != Trace.empty => seen += tr
           case _ =>
         }
+        i -= 1
       }
       seen.toList
     }

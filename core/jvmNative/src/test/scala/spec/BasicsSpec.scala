@@ -121,5 +121,43 @@ class BasicsSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       }
       new MyTaskable("Hello").sync() should be("Hello")
     }
+    "propagate error when throw is used inside handleError" in {
+      val result = Task.error[String](new RuntimeException("original error"))
+        .handleError { t =>
+          throw t // should behave the same as Task.error(t)
+        }
+        .attempt
+        .sync()
+      result.isFailure should be(true)
+      result.failed.get.getMessage should be("original error")
+    }
+    "propagate error when throw is used inside handleError with guarantee" in {
+      var guaranteeRan = false
+      val result = Task.error[String](new RuntimeException("inner"))
+        .guarantee(Task { guaranteeRan = true })
+        .handleError { t =>
+          throw t
+        }
+        .attempt
+        .sync()
+      result.isFailure should be(true)
+      guaranteeRan should be(true)
+    }
+    "propagate error from stream drain through handleError with throw" in {
+      val result = rapid.Stream(1, 2, 3)
+        .evalMap { i =>
+          if (i == 2) Task.error[Int](new RuntimeException("stream element 2 failed"))
+          else Task(i)
+        }
+        .drain
+        .map(_ => "ok")
+        .handleError { t =>
+          throw t
+        }
+        .attempt
+        .sync()
+      result.isFailure should be(true)
+      result.failed.get.getMessage should be("stream element 2 failed")
+    }
   }
 }

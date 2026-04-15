@@ -27,9 +27,12 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   private def collectTraces(): List[Trace] = {
     val seen = new mutable.LinkedHashSet[Trace]
     if (lastTrace != Trace.empty) seen += lastTrace
-    var i = stack.size - 1
+    // Snapshot the stack to avoid IndexOutOfBoundsException from concurrent mutation
+    // (resume() can schedule runLoop() on another thread, which calls removeLast()).
+    val snapshot = stack.toArray
+    var i = snapshot.length - 1
     while (i >= 0) {
-      stack(i) match {
+      snapshot(i) match {
         case tr: Trace if tr != Trace.empty => seen += tr
         case ErrorHandlerMarker(_, tr) if tr != Trace.empty => seen += tr
         case _ =>
@@ -73,8 +76,9 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
             case _: MatchError =>
               // Partial function didn't match — continue searching for another handler
             case handlerError: Throwable =>
-              // Handler itself threw — treat as unhandled, propagate original error
-              return false
+              // Handler itself threw — convert to Task.error so it propagates through the task chain
+              stack.append(Task.error(handlerError))
+              return true
           }
         case _ =>
       }
