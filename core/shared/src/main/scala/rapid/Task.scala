@@ -338,12 +338,18 @@ trait Task[+Return] {
    *
    * @param task the task to guarantee invocation of
    */
-  def guarantee(task: => Task[Unit])(implicit file: File, line: Line, enclosing: Enclosing): Task[Return] = attempt
-    .flatTap { _ =>
-      task
-        .handleError(_ => Task.unit)    // Ignore errors on guarantee
+  def guarantee(task: => Task[Unit])(implicit file: File, line: Line, enclosing: Enclosing): Task[Return] =
+    attempt.flatMap { primary =>
+      task.attempt.map {
+        case Success(_) => primary.get
+        case Failure(cleanupError) => primary match {
+          case Success(_) => throw cleanupError
+          case Failure(primaryError) =>
+            primaryError.addSuppressed(cleanupError)
+            throw primaryError
+        }
+      }
     }
-    .map(_.get)
 
   /**
    * Synchronously (blocking) executes the task and returns the result.

@@ -1,5 +1,5 @@
 # Rapid
-[![CI](https://github.com/outr/lightdb/actions/workflows/ci.yml/badge.svg)](https://github.com/outr/lightdb/actions/workflows/ci.yml)
+[![CI](https://github.com/outr/rapid/actions/workflows/ci.yml/badge.svg)](https://github.com/outr/rapid/actions/workflows/ci.yml)
 
 **Rapid** is a high-performance, minimal-overhead effect, concurrency, and streaming library for Scala 2 and 3, designed
 for scenarios where execution speed and allocation efficiency are critical. Primarily focused around simplicity and

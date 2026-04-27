@@ -37,5 +37,33 @@ class TaskSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       Task(counter += 1).repeat(Repeat.Times(5)).sync()
       counter should be(5)
     }
+    "propagate errors thrown by the guarantee block on a successful task" in {
+      val task = Task { 42 }.guarantee(Task {
+        throw new RuntimeException("cleanup boom")
+      })
+      val ex = the[RuntimeException] thrownBy task.sync()
+      ex.getMessage should be("cleanup boom")
+    }
+    "preserve the primary error and attach the cleanup error as suppressed" in {
+      val task = Task[Int] { throw new RuntimeException("primary") }.guarantee(Task {
+        throw new RuntimeException("cleanup boom")
+      })
+      val ex = the[RuntimeException] thrownBy task.sync()
+      ex.getMessage should be("primary")
+      ex.getSuppressed.map(_.getMessage).toList should contain("cleanup boom")
+    }
+    "run the guarantee block on success and return the primary value" in {
+      var ran = false
+      val task = Task { 42 }.guarantee(Task { ran = true })
+      task.sync() shouldEqual 42
+      ran should be(true)
+    }
+    "run the guarantee block on failure and propagate the primary error" in {
+      var ran = false
+      val task = Task[Int] { throw new RuntimeException("primary") }.guarantee(Task { ran = true })
+      val ex = the[RuntimeException] thrownBy task.sync()
+      ex.getMessage should be("primary")
+      ran should be(true)
+    }
   }
 }
