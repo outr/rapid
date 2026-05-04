@@ -179,15 +179,23 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
       }
   }
 
+  // resume / resumeWithError move all fiber-state mutation INSIDE the scheduled
+  // block so previous / suspended / stack are only ever touched from the
+  // thread that runs runLoop(). Without this, a synchronous callback from
+  // Completable.onComplete (when the completable is already resolved) would
+  // flip suspended to false on the calling thread, causing the in-flight
+  // runLoop to keep iterating in parallel with the newly scheduled one.
   private def resume(result: Any): Unit = {
-    previous = result
-    suspended = false
-    Platform.schedule(() => runLoop())
+    Platform.schedule { () =>
+      previous = result
+      suspended = false
+      runLoop()
+    }
   }
 
   private def resumeWithError(t: Throwable): Unit = {
-    suspended = false
     Platform.schedule { () =>
+      suspended = false
       val error = applyTraces(t)
       if (findAndApplyErrorHandler(error)) {
         runLoop()
@@ -198,6 +206,7 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   }
 
   private def completeWith(result: Try[Any]): Unit = callbackLock.synchronized {
+    if (_result.isDefined) return
     _result = Some(result)
     val cbs = completionCallbacks
     completionCallbacks = Nil
