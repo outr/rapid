@@ -4,6 +4,7 @@ import rapid.task.{Completable, FlatMap, HandleError, Pure, Sleep, Suspend, Task
 import rapid.trace.Trace
 import rapid.{Fiber, Platform, Task}
 
+import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.util.{Failure, Success, Try}
 
@@ -22,7 +23,13 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   private val callbackLock = new AnyRef
   // Serializes runLoop() so a resumed evaluation can never iterate concurrently
   // with an in-flight one. See resume() for the full rationale.
-  private val runLock = new AnyRef
+  //
+  // This MUST be a ReentrantLock, not an intrinsic monitor (`synchronized`):
+  // runLoop() holds it while the virtual-thread Sleep fast-path calls
+  // Thread.sleep(), and on JDK < 24 a virtual thread inside a `synchronized`
+  // block is pinned to its carrier — collapsing parallelism to the core count.
+  // A ReentrantLock does not pin, so the carrier is freed during the sleep.
+  private val runLock = new ReentrantLock()
 
   stack.append(task)
   runLoop()
@@ -49,7 +56,8 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
     if (tracing) Trace.update(t, collectTraces()) else t
   }
 
-  private def runLoop(): Unit = runLock.synchronized {
+  private def runLoop(): Unit = {
+    runLock.lock()
     try {
       while (stack.nonEmpty && !suspended) {
         handle(stack.removeLast())
@@ -65,6 +73,8 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
         } else {
           completeWith(Failure(error))
         }
+    } finally {
+      runLock.unlock()
     }
   }
 
@@ -198,17 +208,21 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   // as a ClassCastException when a caller cast the result to the task's real type.
   private def resume(result: Any): Unit = {
     Platform.schedule { () =>
-      runLock.synchronized {
+      runLock.lock()
+      try {
         previous = result
         suspended = false
         runLoop()
+      } finally {
+        runLock.unlock()
       }
     }
   }
 
   private def resumeWithError(t: Throwable): Unit = {
     Platform.schedule { () =>
-      runLock.synchronized {
+      runLock.lock()
+      try {
         suspended = false
         val error = applyTraces(t)
         if (findAndApplyErrorHandler(error)) {
@@ -216,6 +230,8 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
         } else {
           completeWith(Failure(error))
         }
+      } finally {
+        runLock.unlock()
       }
     }
   }
