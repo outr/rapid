@@ -20,6 +20,9 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   @volatile private var _result: Option[Try[Any]] = None
   private var completionCallbacks: List[Try[Any] => Unit] = Nil
   private val callbackLock = new AnyRef
+  // Serializes runLoop() so a resumed evaluation can never iterate concurrently
+  // with an in-flight one. See resume() for the full rationale.
+  private val runLock = new AnyRef
 
   stack.append(task)
   runLoop()
@@ -46,7 +49,7 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
     if (tracing) Trace.update(t, collectTraces()) else t
   }
 
-  private def runLoop(): Unit = {
+  private def runLoop(): Unit = runLock.synchronized {
     try {
       while (stack.nonEmpty && !suspended) {
         handle(stack.removeLast())
@@ -179,28 +182,40 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
       }
   }
 
-  // resume / resumeWithError move all fiber-state mutation INSIDE the scheduled
-  // block so previous / suspended / stack are only ever touched from the
-  // thread that runs runLoop(). Without this, a synchronous callback from
-  // Completable.onComplete (when the completable is already resolved) would
-  // flip suspended to false on the calling thread, causing the in-flight
-  // runLoop to keep iterating in parallel with the newly scheduled one.
+  // runLoop() holds runLock for its entire execution, and resume / resumeWithError
+  // perform ALL fiber-state mutation (previous, suspended, stack) under that same
+  // lock. This fully serializes fiber evaluation: a resume that races an in-flight
+  // runLoop blocks until that runLoop has observed `suspended` and returned, so two
+  // threads can never iterate runLoop()/handle() concurrently.
+  //
+  // The earlier approach — mutating inside Platform.schedule's block without a lock
+  // — was insufficient: a synchronous Completable.onComplete callback (fired when the
+  // completable was already resolved at registration time) reaches resume() on a
+  // second thread, which flipped `suspended` to false while the suspending runLoop
+  // was still between handle() and its `while (... && !suspended)` re-check. That
+  // runLoop then kept iterating in parallel with the resumed one, corrupting
+  // `previous` — the fiber would return a stale intermediate value, surfacing later
+  // as a ClassCastException when a caller cast the result to the task's real type.
   private def resume(result: Any): Unit = {
     Platform.schedule { () =>
-      previous = result
-      suspended = false
-      runLoop()
+      runLock.synchronized {
+        previous = result
+        suspended = false
+        runLoop()
+      }
     }
   }
 
   private def resumeWithError(t: Throwable): Unit = {
     Platform.schedule { () =>
-      suspended = false
-      val error = applyTraces(t)
-      if (findAndApplyErrorHandler(error)) {
-        runLoop()
-      } else {
-        completeWith(Failure(error))
+      runLock.synchronized {
+        suspended = false
+        val error = applyTraces(t)
+        if (findAndApplyErrorHandler(error)) {
+          runLoop()
+        } else {
+          completeWith(Failure(error))
+        }
       }
     }
   }

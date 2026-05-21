@@ -9,9 +9,21 @@ val developerURL: String = "https://matthicks.com"
 
 name := projectName
 ThisBuild / organization := org
-ThisBuild / version := "2.9.4"
+ThisBuild / version := "2.9.5-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.3"
 ThisBuild / scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
+
+// Scala 3 scaladoc forks its own JVM and doesn't inherit `.jvmopts`.
+// publishLocal triggers `doc` for every module — give the fork enough
+// heap so it doesn't spin in GC. 1G default OOMs on rapid-core's
+// (large) scaladoc run; 8G is comfortable headroom.
+// `ThisBuild` scope so it applies to every project's `Compile / doc`
+// (`Global / Compile` is invalid — a fully-resolved scope can't take a config axis).
+ThisBuild / Compile / doc / fork := true
+ThisBuild / Compile / doc / javaOptions ++= Seq("-Xmx8g", "-Xss4m", "-XX:MaxMetaspaceSize=2g")
+// Belt-and-suspenders: also force at the unscoped doc task so
+// downstream module-specific overrides inherit the bumped heap.
+ThisBuild / doc / javaOptions ++= Seq("-Xmx8g", "-Xss4m", "-XX:MaxMetaspaceSize=2g")
 
 ThisBuild / sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost
 ThisBuild / publishTo := sonatypePublishToBundle.value
