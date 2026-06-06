@@ -6,7 +6,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Minute, Span}
 import rapid._
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import scala.collection.mutable.ListBuffer
 
 class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
@@ -83,6 +84,36 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val stream2 = Stream.emits(List(4, 5, 6))
       val result = stream1.append(stream2).toList.sync()
       result shouldEqual List(1, 2, 3, 4, 5, 6)
+    }
+    "not acquire the appended stream's pull until the left side terminates" in {
+      // The right operand's `task` (resource acquisition / effects) must be
+      // deferred until the left drains — not run up front when the combined
+      // stream starts. A right side whose `task` records when it ran proves
+      // the ordering: it must fire only after every left element is pulled.
+      val order = new ListBuffer[String]
+      val left = Stream.emits(List("a", "b", "c")).map { v =>
+        order.synchronized(order += s"left:$v")
+        v
+      }
+      val right = Stream(Task {
+        order.synchronized(order += "right:acquire")
+        Pull.fromList(List("d"))
+      })
+      val result = (left ++ right).toList.sync()
+      result shouldEqual List("a", "b", "c", "d")
+      order.toList shouldEqual List("left:a", "left:b", "left:c", "right:acquire")
+    }
+    "not acquire the appended stream's pull when the left side is short-circuited" in {
+      // If the consumer stops before the left drains, the right side's
+      // `task` must never run.
+      val acquired = new AtomicBoolean(false)
+      val right = Stream(Task {
+        acquired.set(true)
+        Pull.fromList(List(99))
+      })
+      val result = (Stream.emits(List(1, 2, 3)) ++ right).take(2).toList.sync()
+      result shouldEqual List(1, 2)
+      acquired.get() shouldBe false
     }
     "unfoldStreamEval closes each page before fetching the next" in {
       val closed = new AtomicInteger(0)

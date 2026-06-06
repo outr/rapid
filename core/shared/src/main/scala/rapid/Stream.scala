@@ -680,24 +680,27 @@ class Stream[+Return](private[rapid] val task: Task[Pull[Return]]) {
    */
   def append[T >: Return](that: => Stream[T]): Stream[T] =
     new Stream[T](
-      task.flatMap { pullR =>
-        that.task.map { pullT =>
-          var firstDone = false
-          pullR.transform { stepTask =>
-            stepTask.map {
-              case Step.Emit(a) => Step.Emit(a)
-              case Step.Skip => Step.Skip
-              case Step.Concat(inner) => Step.Concat(inner)
-              case Step.Stop =>
-                if (!firstDone) {
-                  firstDone = true
-                  Step.Concat(pullT)
-                } else {
-                  Step.Stop
-                }
-            }
-          }.onClose(pullR.close.flatMap(_ => pullT.close))
-        }
+      task.map { pullR =>
+        // Acquire the right pull lazily — only when the left side stops —
+        // so the appended stream's `task` (resource acquisition / effects)
+        // is not run up front, before the left has produced anything. The
+        // by-name `that` is touched a single time, inside the terminal
+        // `Stop` transition.
+        val firstDone = new AtomicBoolean(false)
+        val rightPull = new AtomicReference[Pull[T]](null)
+        pullR.transform { stepTask =>
+          stepTask.flatMap {
+            case Step.Stop if firstDone.compareAndSet(false, true) =>
+              that.task.map { pullT =>
+                rightPull.set(pullT)
+                Step.Concat(pullT)
+              }
+            case other => Task.pure[Step[T]](other)
+          }
+        }.onClose(Task.unit.flatMap { _ =>
+          val pullT = rightPull.get()
+          if (pullT != null) pullT.close else Task.unit
+        })
       }
     )
 
