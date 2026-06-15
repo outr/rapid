@@ -36,6 +36,42 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       closed shouldBe true
     }
 
+    "handleErrorWith — pass through when no error occurs" in {
+      Stream.emits(List(1, 2, 3)).handleErrorWith(_ => Stream.emits(List(99))).toList.sync() shouldEqual List(1, 2, 3)
+    }
+    "handleErrorWith — recover to the fallback when the stream errors before emitting" in {
+      val erring = Stream.emit(1).evalMap[Int](_ => Task.error(new RuntimeException("boom")))
+      erring.handleErrorWith(_ => Stream.emits(List(7, 8, 9))).toList.sync() shouldEqual List(7, 8, 9)
+    }
+    "handleErrorWith — preserve the prefix emitted before the error, then append the recovery" in {
+      val partial = Stream.emits(List(1, 2, 3)).evalMap[Int](x =>
+        if (x == 2) Task.error(new RuntimeException("boom")) else Task.pure(x))
+      partial.handleErrorWith(_ => Stream.emits(List(99))).toList.sync() shouldEqual List(1, 99)
+    }
+    "handleErrorWith — propagate when the recovery stream itself re-raises" in {
+      val erring = Stream.emit(1).evalMap[Int](_ => Task.error(new RuntimeException("boom")))
+      intercept[RuntimeException] {
+        erring.handleErrorWith(t => Stream.emit(()).evalMap[Int](_ => Task.error(t))).toList.sync()
+      }
+    }
+    "handleErrorWith — expose the thrown error to the recovery function" in {
+      val erring = Stream.emit(1).evalMap[Int](_ => Task.error(new RuntimeException("the-message")))
+      erring.handleErrorWith(t => Stream.emits(List(t.getMessage.length))).toList.sync() shouldEqual List("the-message".length)
+    }
+    "handleErrorWith — recover from Stream.force(Task.error) under flatMap" in {
+      val erring: Stream[Int] = Stream.force(Task.error(new RuntimeException("boom")))
+      erring.flatMap(x => Stream.emit(x)).handleErrorWith(_ => Stream.emits(List(1, 2))).toList.sync() shouldEqual List(1, 2)
+    }
+    "handleErrorWith — recover from an evalMap error in a ++ RHS after a real prefix" in {
+      val erring = Stream.emits(List(1)) ++ Stream.emit(()).evalMap[Int](_ => Task.error(new RuntimeException("boom")))
+      erring.handleErrorWith(_ => Stream.emits(List(9))).toList.sync() shouldEqual List(1, 9)
+    }
+    "handleErrorWith — recover from a Concat-nested error (emit then error via ++)" in {
+      val tail: Stream[Int] = Stream.force(Task.error(new RuntimeException("boom")))
+      val erring = Stream.emit(0).flatMap(_ => Stream.empty[Int]) ++ tail
+      erring.handleErrorWith(_ => Stream.emits(List(5, 6))).toList.sync() shouldEqual List(5, 6)
+    }
+
     "correctly map elements" in {
       val stream = Stream.emits(List(1, 2, 3, 4))
       val result = stream.map(_ * 2).toList.sync()

@@ -745,6 +745,55 @@ class Stream[+Return](private[rapid] val task: Task[Pull[Return]]) {
   )
 
   /**
+   * Recover from a stream error by switching to the stream produced by `f`.
+   *
+   * Emits this stream's elements as they are pulled; if pulling raises, `f` is
+   * called with the error and the stream it returns becomes the continuation
+   * (it may itself re-raise to propagate). Elements already emitted before the
+   * error are preserved — the recovery stream is appended after them — and once
+   * recovery engages the original stream is not resumed.
+   *
+   * Unlike [[onErrorFinalize]] (which only runs a finalizer and re-raises),
+   * this fully replaces the failed tail, so a caller can express "retry / fall
+   * back, but only if nothing has been emitted yet" by inspecting state inside
+   * `f`.
+   */
+  def handleErrorWith[R >: Return](f: Throwable => Stream[R]): Stream[R] = {
+    // A single recovery is shared across every wrapped pull (the top pull AND
+    // every `Step.Concat` descendant), so an error at ANY depth — including the
+    // RHS of a `++` after the LHS has emitted — switches the whole stream to
+    // `f(error)`. Once recovery engages, every wrapped pull short-circuits to
+    // the recovery pull (which the consumer drains in place); the outer pulls
+    // it was descended from then see it already exhausted, so nothing resumes
+    // the failed stream and nothing is double-emitted.
+    val recovered = new java.util.concurrent.atomic.AtomicReference[Option[Pull[R]]](None)
+    def recover(t: Throwable): Task[Step[R]] = recovered.get() match {
+      case Some(rec) => rec.pull
+      case None =>
+        f(t).task.flatMap { recPull =>
+          recovered.set(Some(recPull))
+          recPull.pull
+        }
+    }
+    def wrap(p: Pull[R]): Pull[R] = Pull[R](
+      pull = Task.defer {
+        recovered.get() match {
+          case Some(rec) => rec.pull
+          case None =>
+            p.pull.map {
+              case Step.Concat(inner) => Step.Concat(wrap(inner))
+              case other              => other
+            }.handleError(recover)
+        }
+      },
+      close = p.close
+    )
+    // `.handleError` on the outer task catches errors raised while PRODUCING the
+    // pull (e.g. `Stream.force` of a failing Task), not only during pulling.
+    new Stream[R](task.map(wrap).handleError(t => f(t).task))
+  }
+
+  /**
    * Drains the stream and fully evaluates it.
    */
   def drain: Task[Unit] = Task {
