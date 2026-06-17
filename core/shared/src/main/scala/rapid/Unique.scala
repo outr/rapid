@@ -12,7 +12,7 @@ class Unique(val length: Int,
 
   def withLength(length: Int): Unique = modify(length = length)
   def withCharacters(characters: String): Unique = modify(characters = characters)
-  def withRandom(forge: Forge[Int, Int]): Unique = modify(random = random)
+  def withRandom(forge: Forge[Int, Int]): Unique = modify(random = forge)
 
   def modify(length: Int = length,
              characters: String = characters,
