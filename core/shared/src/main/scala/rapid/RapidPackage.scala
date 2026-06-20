@@ -17,6 +17,7 @@ trait RapidPackage {
   implicit final class FiberOps[+A](private val fiber: Fiber[A]) {
     def map[B](f: A => B): Task[B] = fiber.join.map(f)
     def flatMap[B](f: A => Task[B]): Task[B] = fiber.join.flatMap(f)
-    def cancel: Task[Boolean] = Task.pure(false)
+    // `cancel` now lives on `Fiber` itself (real interruption); the former
+    // no-op extension was removed so `fiber.cancel` resolves to the member.
   }
 }

@@ -20,6 +20,18 @@ class VirtualThreadFiber[Return](task: Task[Return]) extends Fiber[Return] {
       }
     })
 
+  /** Interrupt the virtual thread carrying this fiber. The thread is either
+    * running the work (interrupting an in-flight blocking op) or parked in
+    * `awaitBlocking()` waiting on the result (interrupting throws from `wait()`),
+    * so cancel unblocks the fiber promptly in both states. No-op if already
+    * complete. */
+  override def cancel: Task[Boolean] = Task {
+    if (_result.isEmpty) {
+      thread.interrupt()
+      true
+    } else false
+  }
+
   private def completeWith(result: Try[Return]): Unit = lock.synchronized {
     _result = Some(result)
     val cbs = completionCallbacks

@@ -264,6 +264,19 @@ trait Task[+Return] {
   }
 
   /**
+   * Run this task with a time limit. If it doesn't complete within `duration`,
+   * the running fiber is cancelled (its carrier thread interrupted — see
+   * [[Fiber.cancel]]) and the result fails with a `TimeoutException`. If the
+   * task completes first, the timer is cancelled. Built on [[Task.race]], so
+   * "cancel the loser" applies to whichever side loses.
+   */
+  def timeout(duration: FiniteDuration): Task[Return] =
+    Task.race(this, Sleep(duration, Trace.empty)).flatMap {
+      case Left(value) => Pure(value)
+      case Right(_)    => Task.error(new TimeoutException(s"Task timed out after $duration"))
+    }
+
+  /**
    * Convenience functionality for repeated execution.
    *
    * @param repeat the Repeat implementation to use
@@ -522,6 +535,32 @@ object Task extends UnitTask {
 
   def completable[T](implicit file: File, line: Line, enclosing: Enclosing): Completable[T] =
     Completable[T](Trace(file, line, enclosing, "completable"))
+
+  /**
+   * Run two tasks concurrently and return the result of whichever SETTLES
+   * first — `Left` if `a` won, `Right` if `b` won. The loser's fiber is
+   * cancelled ([[Fiber.cancel]] interrupts its carrier thread). "Settles" means
+   * completes OR fails: if the first to finish fails, the race fails with that
+   * error (and still cancels the other side). Each task runs on its own fiber,
+   * so a blocking task doesn't starve the other.
+   */
+  def race[A, B](a: Task[A], b: Task[B]): Task[Either[A, B]] =
+    a.start.flatMap { fa =>
+      b.start.flatMap { fb =>
+        val out = completable[Either[A, B]]
+        // `out` is first-wins (Completable.complete ignores later calls), so the
+        // first fiber to settle determines the result; the other is cancelled.
+        fa.onComplete {
+          case Success(v) => out.complete(Success(Left(v)));  fb.cancel.startUnit()
+          case Failure(t) => out.complete(Failure(t));        fb.cancel.startUnit()
+        }
+        fb.onComplete {
+          case Success(v) => out.complete(Success(Right(v))); fa.cancel.startUnit()
+          case Failure(t) => out.complete(Failure(t));        fa.cancel.startUnit()
+        }
+        out
+      }
+    }
 
   /** Fast-path evaluator for tasks that are typically Pure or Suspend. Falls back to SynchronousFiber for complex tasks. */
   private[rapid] def quickEval[T](task: Task[T]): T = {

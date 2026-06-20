@@ -14,6 +14,21 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
   private var result: Any = _
   private var done: CountDownLatch = _
   private var completionCallbacks: List[Try[Return] => Unit] = Nil
+  // The pool thread currently running this fiber's interpreter, or null when the
+  // fiber is suspended (released to the pool) or complete. `cancel` interrupts it.
+  @volatile private var runningThread: Thread = _
+
+  /** Interrupt the pool thread currently running this fiber, so an in-flight
+    * blocking op aborts. Best-effort: a fiber suspended onto an external
+    * callback has no carrier thread to interrupt (returns false) — its result is
+    * simply discarded by whoever cancelled it. No-op if already complete. */
+  override def cancel: Task[Boolean] = Task {
+    val t = runningThread
+    if (!completed && (t ne null)) {
+      t.interrupt()
+      true
+    } else false
+  }
 
   private def completeSuccess(v: Any): Unit = this.synchronized {
     result = v
@@ -87,6 +102,7 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
     }
 
     private def stepLoop(scheduleOnYield: Boolean): Unit = {
+      runningThread = Thread.currentThread()
       try {
         var continue = true
         while (continue && !stack.isEmpty) {
@@ -156,6 +172,11 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
           } else {
             completeFailure(error)
           }
+      } finally {
+        // The interpreter has either suspended (released to the pool) or
+        // completed; this thread no longer carries the fiber, so don't let a
+        // later `cancel` interrupt it while it serves another fiber.
+        runningThread = null
       }
     }
 
