@@ -491,9 +491,22 @@ class Stream[+Return](private[rapid] val task: Task[Pull[Return]]) {
     }
   })
 
-  def guarantee(task: Task[Unit]): Stream[Return] = new Stream[Return](this.task.map { pull =>
-    pull.onClose(task)
-  })
+  /**
+   * Run `task` when this stream terminates, however it terminates.
+   *
+   * Three exits, all covered: normal completion and early abandonment
+   * (via the pull's `onClose`), and failure of the stream's OWN task —
+   * the case where there is no pull to close because the stream never
+   * started. Attaching only to the pull silently skips that last one,
+   * so a finalizer holding a resource (a permit, a connection, a lock)
+   * leaks it exactly when the stream failed to start, which is when
+   * the resource most needs returning.
+   */
+  def guarantee(task: Task[Unit]): Stream[Return] = new Stream[Return](
+    this.task
+      .map(pull => pull.onClose(task))
+      .handleError(t => task.handleError(_ => Task.unit).flatMap(_ => Task.error(t)))
+  )
 
   def find(p: Return => Boolean): Task[Option[Return]] =
     task.flatMap { pullR =>
@@ -735,13 +748,17 @@ class Stream[+Return](private[rapid] val task: Task[Pull[Return]]) {
 
   /** Run `fin(t)` if the pull throws; useful for logging/cleanup on error. */
   def onErrorFinalize(fin: Throwable => Task[Unit]): Stream[Return] = new Stream[Return](
-    task.map { pullR =>
-      pullR.transform { stepTask =>
-        stepTask.handleError { t =>
-          fin(t).handleError(_ => Task.unit).flatMap(_ => Task.error(t))
+    task
+      .map { pullR =>
+        pullR.transform { stepTask =>
+          stepTask.handleError { t =>
+            fin(t).handleError(_ => Task.unit).flatMap(_ => Task.error(t))
+          }
         }
       }
-    }
+      // Wrapping only the step task misses a failure of the stream's own
+      // task, where no pull is ever produced to wrap. See [[guarantee]].
+      .handleError(t => fin(t).handleError(_ => Task.unit).flatMap(_ => Task.error(t)))
   )
 
   /**

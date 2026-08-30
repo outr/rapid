@@ -13,6 +13,42 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
   override def timeLimit: Span = Span(1, Minute)
 
   "Stream" should {
+    "run an onErrorFinalize finalizer when the stream's own task fails" in {
+      var seen: Option[Throwable] = None
+      val boom = new RuntimeException("task failed")
+      Stream
+        .force(Task.error[Stream[Int]](boom))
+        .onErrorFinalize(t => Task { seen = Some(t) })
+        .toList
+        .attempt
+        .map { outcome =>
+          outcome.isFailure should be(true)
+          seen.map(_.getMessage) should be(Some("task failed"))
+        }
+    }
+        "run a guarantee finalizer when the stream's own task fails" in {
+      // A stream whose TASK fails never yields a pull, so a finalizer
+      // attached only to the pull never runs — and whatever the
+      // finalizer was releasing (a permit, a connection) leaks at
+      // exactly the moment the stream failed to start.
+      val ran = new AtomicBoolean(false)
+      val stream = Stream
+        .force[Int](Task.error(new RuntimeException("stream never started")))
+        .guarantee(Task(ran.set(true)))
+      val outcome = stream.toList.attempt.sync()
+      outcome.isFailure should be(true)
+      ran.get() should be(true)
+    }
+
+    "run a guarantee finalizer exactly once when the task fails" in {
+      val count = new AtomicInteger(0)
+      val stream = Stream
+        .force[Int](Task.error(new RuntimeException("boom")))
+        .guarantee(Task(count.incrementAndGet()).unit)
+      stream.toList.attempt.sync()
+      count.get() should be(1)
+    }
+
     "call close on Pull for normal completion and on error" in {
       @volatile var closed = false
       val base = Pull.fromList(List(1, 2, 3))
