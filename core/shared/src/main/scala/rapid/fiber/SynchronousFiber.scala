@@ -20,7 +20,10 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
   @volatile private var suspended = false
   @volatile private var _result: Option[Try[Any]] = None
   private var completionCallbacks: List[Try[Any] => Unit] = Nil
-  private val callbackLock = new AnyRef
+  // Guards _result / completionCallbacks and carries the completion signal
+  // awaitBlocking() waits on. See CompletionSignal for why this is not an
+  // intrinsic monitor.
+  private val callbackLock = new CompletionSignal
   // Serializes runLoop() so a resumed evaluation can never iterate concurrently
   // with an in-flight one. See resume() for the full rationale.
   //
@@ -236,16 +239,24 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
     }
   }
 
-  private def completeWith(result: Try[Any]): Unit = callbackLock.synchronized {
-    if (_result.isDefined) return
-    _result = Some(result)
-    val cbs = completionCallbacks
-    completionCallbacks = Nil
+  private def completeWith(result: Try[Any]): Unit = {
+    var cbs: List[Try[Any] => Unit] = Nil
+    callbackLock.acquire()
+    try {
+      if (_result.isDefined) return
+      _result = Some(result)
+      cbs = completionCallbacks
+      completionCallbacks = Nil
+      callbackLock.signalAll()
+    } finally {
+      callbackLock.release()
+    }
+    // Callbacks run outside the lock so arbitrary downstream work never blocks a
+    // waiter (or another fiber's completion) behind this fiber's callback list.
     cbs.foreach { cb =>
       try cb(result)
       catch { case _: Throwable => () }
     }
-    callbackLock.notifyAll()
   }
 
   def isComplete: Boolean = _result.isDefined
@@ -261,16 +272,28 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
     c
   }
 
-  override def onComplete(f: Try[Return] => Unit): Unit = callbackLock.synchronized {
-    _result match {
-      case Some(r) => f(r.asInstanceOf[Try[Return]])
-      case None =>
-        completionCallbacks = ((r: Try[Any]) => f(r.asInstanceOf[Try[Return]])) :: completionCallbacks
+  override def onComplete(f: Try[Return] => Unit): Unit = {
+    var immediate: Option[Try[Any]] = None
+    callbackLock.acquire()
+    try {
+      _result match {
+        case Some(r) => immediate = Some(r)
+        case None =>
+          completionCallbacks = ((r: Try[Any]) => f(r.asInstanceOf[Try[Return]])) :: completionCallbacks
+      }
+    } finally {
+      callbackLock.release()
     }
+    immediate.foreach(r => f(r.asInstanceOf[Try[Return]]))
   }
 
-  private[rapid] def awaitBlocking(): Return = callbackLock.synchronized {
-    while (_result.isEmpty) callbackLock.wait()
+  private[rapid] def awaitBlocking(): Return = {
+    callbackLock.acquire()
+    try {
+      while (_result.isEmpty) callbackLock.await()
+    } finally {
+      callbackLock.release()
+    }
     _result.get match {
       case Success(r) => r.asInstanceOf[Return]
       case Failure(t) => throw t

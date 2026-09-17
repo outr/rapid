@@ -3,35 +3,49 @@ package rapid.task
 import rapid.Task
 import rapid.trace.Trace
 
+import java.util.concurrent.locks.ReentrantLock
 import scala.util.{Failure, Success, Try}
 
 case class Completable[+Return](trace: Trace) extends Task[Return] {
   @volatile private var _result: Option[Try[Any]] = None
   private var callbacks: List[Try[Any] => Unit] = Nil
-  private val lock = new AnyRef
+  // A ReentrantLock rather than an intrinsic monitor: completion callbacks are
+  // arbitrary user code run while holding this, and on JDK < 24 a virtual thread
+  // that blocks inside `synchronized` stays pinned to its carrier.
+  private val lock = new ReentrantLock()
 
   def result: Option[Try[Return]] = _result.asInstanceOf[Option[Try[Return]]]
 
-  def onComplete(cb: Try[Return] => Unit): Unit = lock.synchronized {
-    val cba: Try[Any] => Unit = (r: Try[Any]) => cb(r.asInstanceOf[Try[Return]])
-    _result match {
-      case Some(r) => cba(r)
-      case None => callbacks = cba :: callbacks
+  def onComplete(cb: Try[Return] => Unit): Unit = {
+    lock.lock()
+    try {
+      val cba: Try[Any] => Unit = (r: Try[Any]) => cb(r.asInstanceOf[Try[Return]])
+      _result match {
+        case Some(r) => cba(r)
+        case None => callbacks = cba :: callbacks
+      }
+    } finally {
+      lock.unlock()
     }
   }
 
   def success[A >: Return](value: A): Unit = complete(Success(value))
   def failure(t: Throwable): Unit = complete(Failure(t))
 
-  def complete[A >: Return](result: Try[A]): Unit = lock.synchronized {
-    if (_result.isEmpty) {
-      _result = Some(result.asInstanceOf[Try[Any]])
-      val cbs = callbacks
-      callbacks = Nil
-      cbs.foreach { cb =>
-        try cb(_result.get)
-        catch { case _: Throwable => () }
+  def complete[A >: Return](result: Try[A]): Unit = {
+    lock.lock()
+    try {
+      if (_result.isEmpty) {
+        _result = Some(result.asInstanceOf[Try[Any]])
+        val cbs = callbacks
+        callbacks = Nil
+        cbs.foreach { cb =>
+          try cb(_result.get)
+          catch { case _: Throwable => () }
+        }
       }
+    } finally {
+      lock.unlock()
     }
   }
 }
