@@ -805,9 +805,23 @@ class Stream[+Return](private[rapid] val task: Task[Pull[Return]]) {
       },
       close = p.close
     )
+    // The recovery pull replaces the failed tail, so closing the stream closes
+    // it too: after the failed pull's own close, even if that one fails, and
+    // once however often the stream is closed.
+    val recoveryClosed = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val closeRecovery: Task[Unit] = Task.defer {
+      recovered.get() match {
+        case Some(rec) if recoveryClosed.compareAndSet(false, true) => rec.close
+        case _ => Task.unit
+      }
+    }
+    def wrapTop(p: Pull[R]): Pull[R] = {
+      val wrapped = wrap(p)
+      wrapped.copy(close = wrapped.close.guarantee(closeRecovery))
+    }
     // `.handleError` on the outer task catches errors raised while PRODUCING the
     // pull (e.g. `Stream.force` of a failing Task), not only during pulling.
-    new Stream[R](task.map(wrap).handleError(t => f(t).task))
+    new Stream[R](task.map(wrapTop).handleError(t => f(t).task))
   }
 
   /**

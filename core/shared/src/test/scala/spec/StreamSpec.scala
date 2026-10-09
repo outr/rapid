@@ -98,6 +98,41 @@ class StreamSpec extends AnyWordSpec with Matchers with TimeLimitedTests {
       val erring: Stream[Int] = Stream.force(Task.error(new RuntimeException("boom")))
       erring.flatMap(x => Stream.emit(x)).handleErrorWith(_ => Stream.emits(List(1, 2))).toList.sync() shouldEqual List(1, 2)
     }
+    "handleErrorWith — close the recovery stream once when the stream is drained" in {
+      val closes = new AtomicInteger(0)
+      val partial = Stream.emits(List(1, 2, 3)).evalMap[Int](x =>
+        if (x == 2) Task.error(new RuntimeException("boom")) else Task.pure(x))
+      partial
+        .handleErrorWith(_ => Stream.emits(List(7, 8)).guarantee(Task(closes.incrementAndGet()).unit))
+        .drain
+        .sync()
+      closes.get() shouldEqual 1
+    }
+    "handleErrorWith — close the recovery stream once when an early take stops it" in {
+      val closes = new AtomicInteger(0)
+      val partial = Stream.emits(List(1, 2, 3)).evalMap[Int](x =>
+        if (x == 2) Task.error(new RuntimeException("boom")) else Task.pure(x))
+      val taken = partial
+        .handleErrorWith(_ => Stream.emits(List(7, 8, 9)).guarantee(Task(closes.incrementAndGet()).unit))
+        .take(2)
+        .toList
+        .sync()
+      taken shouldEqual List(1, 7)
+      closes.get() shouldEqual 1
+    }
+    "handleErrorWith — close the recovery stream once when it raises" in {
+      val closes = new AtomicInteger(0)
+      val erring = Stream.emit(1).evalMap[Int](_ => Task.error(new RuntimeException("boom")))
+      val recovery = Stream.emits(List(7, 8)).evalMap[Int](x =>
+        if (x == 8) Task.error(new RuntimeException("recovery failed")) else Task.pure(x))
+      intercept[RuntimeException] {
+        erring
+          .handleErrorWith(_ => recovery.guarantee(Task(closes.incrementAndGet()).unit))
+          .toList
+          .sync()
+      }.getMessage shouldEqual "recovery failed"
+      closes.get() shouldEqual 1
+    }
     "handleErrorWith — recover from an evalMap error in a ++ RHS after a real prefix" in {
       val erring = Stream.emits(List(1)) ++ Stream.emit(()).evalMap[Int](_ => Task.error(new RuntimeException("boom")))
       erring.handleErrorWith(_ => Stream.emits(List(9))).toList.sync() shouldEqual List(1, 9)
