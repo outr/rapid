@@ -6,16 +6,29 @@ import java.util.concurrent.{Executors, ScheduledExecutorService, ThreadFactory,
 import scala.concurrent.ExecutionContext
 
 object Platform extends RapidPlatform {
+  /** Whether this runtime has virtual threads at all.
+    *
+    * `Task.Virtual` is a switch, not an answer: it is true by default, and on a runtime without virtual threads
+    * that sent every fiber to a `Thread.ofVirtual` that is not there. Android has no virtual threads at any
+    * version, and neither does a JVM before 21. Asked once, here, and every use of them is gated on it. */
+  private val hasVirtual: Boolean =
+    try {
+      classOf[Thread].getMethod("ofVirtual")
+      true
+    } catch {
+      case _: Throwable => false
+    }
+
   override def executionContext: ExecutionContext =
     rapid.fiber.FixedThreadPoolFiber.executionContext
   override def supportsCancel: Boolean = false
   override def createFiber[Return](task: Task[Return]): Fiber[Return] =
-    if (Task.Virtual) new rapid.fiber.VirtualThreadFiber(task)
+    if (Task.Virtual && hasVirtual) new rapid.fiber.VirtualThreadFiber(task)
     else new rapid.fiber.FixedThreadPoolFiber(task)
-  override def isVirtualThread: Boolean = Thread.currentThread().isVirtual
+  override def isVirtualThread: Boolean = hasVirtual && Thread.currentThread().isVirtual
   override def delay(millis: Long): Unit = Thread.sleep(millis)
   override def runAsync(task: Task[_]): Unit =
-    if (Task.Virtual) {
+    if (Task.Virtual && hasVirtual) {
       Thread.ofVirtual().start(() => { new SynchronousFiber(task); () })
     } else {
       rapid.fiber.FixedThreadPoolFiber.execute(() => { new SynchronousFiber(task); () })
