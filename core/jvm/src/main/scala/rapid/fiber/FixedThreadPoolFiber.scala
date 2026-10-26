@@ -60,6 +60,9 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
     private var previous: Any = ()
     private val tracing = Trace.Enabled
     private var lastTrace: Trace = Trace.empty
+    // Pending frame traces on the stack, so recording stops at Trace.MaxFrames. A loop never finishes
+    // a frame, and unbounded this keeps one trace per iteration for the life of the fiber.
+    private var frames = 0
 
     private val resumeRunnable: Runnable = new Runnable {
       override def run(): Unit = FixedThreadPoolFiber.executor.execute(Interpreter.this)
@@ -89,12 +92,21 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
       if (tracing) Trace.update(t, collectTraces()) else t
     }
 
+    /** Record a pending frame, up to [[Trace.MaxFrames]] of them. */
+    private def pushFrame(tr: Trace): Unit = if (frames < Trace.MaxFrames) {
+      stack.push(tr)
+      frames += 1
+    }
+
     private def findAndApplyErrorHandler(t: Throwable): Boolean = {
       while (!stack.isEmpty) {
         stack.pop() match {
           case ErrorHandlerMarker(handler, _) =>
             stack.push(handler(t))
             return true
+          // Discarded here rather than through handle(), so the count is kept in step itself; one left
+          // too high would quietly stop recording frames for the rest of the fiber.
+          case _: Trace => frames -= 1
           case _ =>
         }
       }
@@ -142,7 +154,7 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
                   stack.push(inner)
                 case FlatMap(input, f, tr) =>
                   if (tracing) {
-                    stack.push(tr)
+                    pushFrame(tr)
                     stack.push((f, tr))
                   } else {
                     stack.push(f)
@@ -152,7 +164,7 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
             case _: ErrorHandlerMarker =>
               ()
             case _: Trace =>
-              ()
+              frames -= 1
             case f: Function1[_, _] =>
               val next = f.asInstanceOf[Any => Task[Any]](previous)
               stack.push(next)

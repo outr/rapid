@@ -16,6 +16,9 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
 
   private var lastTrace: Trace = Trace.empty
   private val stack = new mutable.ArrayDeque[Any]
+  // Pending frame traces currently on the stack, so recording them can stop at Trace.MaxFrames. A
+  // loop never finishes a frame, and without this the stack keeps one trace per iteration forever.
+  private var frames = 0
   private var previous: Any = ()
   @volatile private var suspended = false
   @volatile private var _result: Option[Try[Any]] = None
@@ -59,6 +62,12 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
     if (tracing) Trace.update(t, collectTraces()) else t
   }
 
+  /** Record a pending frame, up to [[Trace.MaxFrames]] of them. */
+  private def pushFrame(tr: Trace): Unit = if (frames < Trace.MaxFrames) {
+    stack.append(tr)
+    frames += 1
+  }
+
   private def runLoop(): Unit = {
     runLock.lock()
     try {
@@ -96,6 +105,9 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
               stack.append(Task.error(handlerError))
               return true
           }
+        // Discarded here rather than through handle(), so the frame count has to be kept in step
+        // itself; a count left too high would quietly stop recording frames for the rest of the fiber.
+        case _: Trace => frames -= 1
         case _ =>
       }
     }
@@ -147,20 +159,20 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
           input match {
             case Pure(v) =>
               previous = v
-              if (tracing) stack.append(tr)
+              if (tracing) pushFrame(tr)
               stack.append(f.asInstanceOf[Any => Task[Any]](v))
             case Suspend(s, tr2) =>
               if (tracing) lastTrace = tr2
               previous = s()
-              if (tracing) stack.append(tr)
+              if (tracing) pushFrame(tr)
               stack.append(f.asInstanceOf[Any => Task[Any]](previous))
             case _: UnitTask =>
               previous = ()
-              if (tracing) stack.append(tr)
+              if (tracing) pushFrame(tr)
               stack.append(f.asInstanceOf[Any => Task[Any]](()))
             case _ =>
               if (tracing) {
-                stack.append(tr)
+                pushFrame(tr)
                 stack.append((f, tr))
               } else {
                 stack.append(f)
@@ -171,7 +183,7 @@ class SynchronousFiber[Return](task: Task[Return]) extends Fiber[Return] {
     case _: ErrorHandlerMarker =>
       ()
     case _: Trace =>
-      ()
+      frames -= 1
     case f: Function1[_, _] =>
       val next = f.asInstanceOf[Any => Task[Any]](previous)
       next match {
