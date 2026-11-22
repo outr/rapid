@@ -5,7 +5,7 @@ import rapid.trace.Trace
 import rapid.{Fiber, Task}
 
 import java.util
-import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, ScheduledExecutorService, ThreadFactory, ThreadPoolExecutor, TimeUnit}
+import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue, ScheduledFuture, ScheduledThreadPoolExecutor, ThreadFactory, ThreadPoolExecutor, TimeUnit}
 import scala.util.{Failure, Success, Try}
 
 class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
@@ -17,17 +17,36 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
   // The pool thread currently running this fiber's interpreter, or null when the
   // fiber is suspended (released to the pool) or complete. `cancel` interrupts it.
   @volatile private var runningThread: Thread = _
+  // The timer of a `Sleep` this fiber is waiting out, or null. `cancel` cancels it, as an interrupt ends a
+  // thread's sleep.
+  @volatile private var sleeping: ScheduledFuture[_] = _
+  // Whether `cancel` was asked for: a fiber not yet sleeping when it came (not started, or between steps) raises the
+  // interrupt when it reaches its sleep, rather than waiting the sleep out.
+  @volatile private var cancelRequested: Boolean = false
 
   /** Interrupt the pool thread currently running this fiber, so an in-flight
-    * blocking op aborts. Best-effort: a fiber suspended onto an external
-    * callback has no carrier thread to interrupt (returns false) — its result is
-    * simply discarded by whoever cancelled it. No-op if already complete. */
+    * blocking op aborts; a fiber waiting out a sleep has its timer cancelled and
+    * fails there with an `InterruptedException`, as a sleeping thread would.
+    * A fiber not yet sleeping fails at its next sleep. Best-effort: a fiber
+    * suspended onto an external callback has no carrier thread to interrupt —
+    * its result is simply discarded by whoever cancelled it. Returns false if
+    * already complete. */
   override def cancel: Task[Boolean] = Task {
-    val t = runningThread
-    if (!completed && (t ne null)) {
-      t.interrupt()
+    if (completed) false
+    else {
+      // Set before the timer is read, as the fiber sets its timer before reading this: one of the two sees the other.
+      cancelRequested = true
+      val t = runningThread
+      if (t ne null) t.interrupt()
+      // Waiting out a sleep, or just set to: the timer is cancelled and the fiber woken with the interrupt a sleeping
+      // thread gets, so the timer no longer holds the fiber, or what waits on it, until it would have fired.
+      val s = sleeping
+      if ((s ne null) && s.cancel(false)) {
+        sleeping = null
+        interpreter.interruptSleep()
+      }
       true
-    } else false
+    }
   }
 
   private def completeSuccess(v: Any): Unit = this.synchronized {
@@ -66,6 +85,23 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
 
     private val resumeRunnable: Runnable = new Runnable {
       override def run(): Unit = FixedThreadPoolFiber.executor.execute(Interpreter.this)
+    }
+
+    // What a sleep's timer runs: the fiber is no longer sleeping, and goes on.
+    private val wakeRunnable: Runnable = new Runnable {
+      override def run(): Unit = {
+        sleeping = null
+        FixedThreadPoolFiber.executor.execute(Interpreter.this)
+      }
+    }
+
+    // An interrupt raised where the fiber slept, set by `cancel` and thrown when the fiber next runs.
+    @volatile private var pendingInterrupt: Throwable = _
+
+    /** Wake the fiber from a sleep whose timer `cancel` cancelled, raising an interrupt there. */
+    def interruptSleep(): Unit = {
+      pendingInterrupt = new InterruptedException("sleep cancelled")
+      FixedThreadPoolFiber.executor.execute(Interpreter.this)
     }
 
     stack.push(root)
@@ -116,6 +152,11 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
     private def stepLoop(scheduleOnYield: Boolean): Unit = {
       runningThread = Thread.currentThread()
       try {
+        val interrupted = pendingInterrupt
+        if (interrupted ne null) {
+          pendingInterrupt = null
+          throw interrupted
+        }
         var continue = true
         while (continue && !stack.isEmpty) {
           def handle(value: Any): Unit = value match {
@@ -129,9 +170,16 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
                   previous = f()
                 case Sleep(duration, tr) =>
                   if (tracing) lastTrace = tr
+                  if (cancelRequested) throw new InterruptedException("sleep cancelled")
                   continue = false
                   val ms = duration.toMillis
-                  FixedThreadPoolFiber.scheduler.schedule(resumeRunnable, ms, TimeUnit.MILLISECONDS)
+                  val timer = FixedThreadPoolFiber.scheduler.schedule(wakeRunnable, ms, TimeUnit.MILLISECONDS)
+                  sleeping = timer
+                  // A cancel that came while the timer was being set found no timer to cancel.
+                  if (cancelRequested && timer.cancel(false)) {
+                    sleeping = null
+                    throw new InterruptedException("sleep cancelled")
+                  }
                   previous = ()
                 case c: Completable[_] =>
                   if (tracing) lastTrace = c.trace
@@ -197,7 +245,9 @@ class FixedThreadPoolFiber[Return](task: Task[Return]) extends Fiber[Return] {
     override def run(): Unit = stepLoop(scheduleOnYield = true)
   }
 
-  FixedThreadPoolFiber.executor.execute(new Interpreter(task))
+  private val interpreter = new Interpreter(task)
+
+  FixedThreadPoolFiber.executor.execute(interpreter)
 
   override def sync(): Return = {
     if (!completed) {
@@ -252,16 +302,21 @@ object FixedThreadPoolFiber {
     new ThreadPoolExecutor.CallerRunsPolicy()
   )
 
-  private lazy val scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(
-    Math.max(Runtime.getRuntime.availableProcessors(), 4),
-    new ThreadFactory {
-      override def newThread(r: Runnable): Thread = {
-        val t = new Thread(r, "rapid-v2-scheduler")
-        t.setDaemon(true)
-        t
+  // A cancelled timer leaves the queue at once, rather than holding what it would have run until its time.
+  private lazy val scheduler: ScheduledThreadPoolExecutor = {
+    val s = new ScheduledThreadPoolExecutor(
+      Math.max(Runtime.getRuntime.availableProcessors(), 4),
+      new ThreadFactory {
+        override def newThread(r: Runnable): Thread = {
+          val t = new Thread(r, "rapid-v2-scheduler")
+          t.setDaemon(true)
+          t
+        }
       }
-    }
-  )
+    )
+    s.setRemoveOnCancelPolicy(true)
+    s
+  }
 
   /** Public entry to schedule a runnable onto the fiber executor. */
   def execute(runnable: Runnable): Unit = executor.execute(runnable)
