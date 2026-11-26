@@ -46,7 +46,7 @@ ThisBuild / Test / logBuffered := false
 
 val sourcecodeVersion: String = "0.4.4"
 
-val scribeVersion: String = "3.19.0"
+val scribeVersion: String = "3.19.1"
 
 /// Testing and Benchmarking Libraries
 
